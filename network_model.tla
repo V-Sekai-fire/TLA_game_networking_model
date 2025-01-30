@@ -8,8 +8,6 @@ TYPE SandboxSynced = {"SyncedVar", "LocalVar"}
 
 (* Define ObjectState *)
 TYPE ObjectState == [
-    position: [x: Real, y: Real, z: Real],
-    velocity: [x: Real, y: Real, z: Real],
     aggregate_group: Nat \/ NULL,
     synced_vars: Seq([variable: String, state: SandboxSynced])
 ]
@@ -38,21 +36,25 @@ Init ==
 AddPlayer(pid, pState) ==
     /\ Len(players) < MAX_PLAYERS
     /\ players' = players \o << pState >>
+    /\ players'.synced_vars = Append(players.synced_vars, << "AddPlayer", ToString(pid) >>)
     /\ UNCHANGED <<objects, event_queue, last_timestamp>>
-
 (* DeletePlayer Operation *)
 DeletePlayer(pid) ==
     /\ players' = [ p \in players : p.id /= pid ]
+    /\ players'.synced_vars = Append(players.synced_vars, << "DeletePlayer", ToString(pid) >>)
     /\ UNCHANGED <<objects, event_queue, last_timestamp>>
-
 (* CreateObject Operation *)
 CREATE CreateObject(pid, oid, oState) ==
     /\ LET player = [p \in players : p.id = pid]
     /\ Len(player.objects) < MAX_OBJECTS
     /\ player.objects' = player.objects \o << [id |-> oid, state |-> oState ] >>
+    /\ player.objects'.synced_vars = Append(player.objects.synced_vars, << "CreateObject", ToString(oid) >>)
     /\ UNCHANGED <<players, event_queue, last_timestamp>>
-
 (* DeleteObject Operation *)
+DeleteObject(oid) ==
+    /\ objects' = [ o \in objects : o.id /= oid ]
+    /\ objects'.synced_vars = Append(objects.synced_vars, << "DeleteObject", ToString(oid) >>)
+    /\ UNCHANGED <<players, event_queue, last_timestamp>>
 DeleteObject(oid) ==
     /\ objects' = [ o \in objects : o.id /= oid ]
     /\ UNCHANGED <<players, event_queue, last_timestamp>>
@@ -126,3 +128,47 @@ ObjectsCountInvariant == Len(objects) <= MAX_OBJECTS
 THEOREM Spec => []PlayersCountInvariant /\ []ObjectsCountInvariant
 
 ====
+(* Define ChairState *)
+TYPE ChairState == ObjectState
+
+(* AddChair Operation *)
+AddChair(cid, cState) ==
+    /\ Len(objects) < MAX_OBJECTS
+    /\ objects' = objects \o << [id |-> cid, state |-> cState] >>
+    /\ UNCHANGED <<players, event_queue, last_timestamp>>
+
+(* SitOnChair Operation *)
+SitOnChair(pid, cid) ==
+    /\ EXISTS p \in players: p.id = pid
+    /\ EXISTS c \in objects: c.id = cid /\ c.aggregate_group = NULL
+    /\ players' = [ p \in players:
+                      IF p.id = pid THEN 
+                          [ p EXCEPT !.state.aggregate_group = cid ]
+                      ELSE 
+                          p
+                  ]
+    /\ objects' = [ c \in objects:
+                      IF c.id = cid THEN
+                          [ c EXCEPT !.aggregate_group = pid ]
+                      ELSE
+                          c
+                  ]
+    /\ UNCHANGED <<event_queue, last_timestamp>>
+
+(* MoveChair Operation *)
+MoveChair(cid, newPosition) ==
+    /\ EXISTS c \in objects: c.id = cid
+    /\ objects' = [ c \in objects:
+                      IF c.id = cid THEN
+                          [ c EXCEPT !.state.position = newPosition ]
+                      ELSE
+                          c
+                  ]
+    /\ UNCHANGED <<players, event_queue, last_timestamp>>
+
+(* Chair Specifications *)
+ChairSpec ==
+    /\ AddChair \/ SitOnChair \/ MoveChair
+
+(* Update Spec *)
+Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec]_<<players, objects, event_queue, last_timestamp>>
