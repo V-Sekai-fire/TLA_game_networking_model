@@ -146,3 +146,23 @@ Fixpoint simulate (steps : nat) (cs : CombinedState) : CombinedState :=
     | 0 => cs
     | S n => simulate n (on_combined_tick cs)
     end.
+    Definition add_player (st : GlobalState) (player : PlayerState) : GlobalState :=
+        {|
+            players := (List.length st.(players), player) :: st.(players);
+            event_queue := st.(event_queue);
+            last_timestamp := st.(last_timestamp)
+        |}.
+
+    Definition delete_player (st : GlobalState) (player_id : nat) : GlobalState :=
+        {|
+            players := filter (fun p => fst p <> player_id) st.(players);
+            event_queue := st.(event_queue);
+            last_timestamp := st.(last_timestamp)
+        |}.
+
+    Definition add_vote (st : GlobalState) (player_id : nat) : GlobalState :=
+        {|
+            players := map (fun p => if fst p = player_id then (fst p, {| p.(position) with velocity := {| x := p.(velocity).(x) + 1; y := p.(velocity).(y); z := p.(velocity).(z) |} |}) else p) st.(players);
+            event_queue := st.(event_queue);
+            last_timestamp := st.(last_timestamp)
+        |}.
