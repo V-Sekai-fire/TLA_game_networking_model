@@ -15,7 +15,14 @@ TYPE ObjectState == [
 (* Define the state of a player, including their ID, state, and owned objects *)
 TYPE PlayerState == [ 
     id: Nat,
-    state: ObjectState,
+    state: [
+        aggregate_group: Nat \/ NULL,
+        synced_vars: << 
+            [variable |-> "position", state |-> "SyncedVar"],
+            [variable |-> "rotation", state |-> "SyncedVar"],
+            [variable |-> "velocity", state |-> "SyncedVar"]
+        >>
+    ],
     objects: Seq([id: Nat, state: ObjectState])
 ]
 
@@ -82,9 +89,14 @@ BEGIN
       \* Add a new player with default state *
       AddPlayer(NewID, [ id |-> NewID,
                         state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
+                                   rotation |-> [x |-> 0, y |-> 0, z |-> 0],
                                    velocity |-> [x |-> 0, y |-> 0, z |-> 0],
                                    aggregate_group |-> NULL,
-                                   synced_vars |-> <<>> ] ])
+                                   synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
+                                                     [variable |-> "rotation", state |-> "SyncedVar"],
+                                                     [variable |-> "velocity", state |-> "SyncedVar"] >>
+                                ],
+                        objects |-> <<>> ])
     or
       \* Remove an existing player if any exist *
       IF Len(players) > 0 THEN
@@ -100,7 +112,8 @@ BEGIN
     or
       \* Create a new object with default state *
       CreateObject(NewOID, [ position |-> [x |-> 1, y |-> 1, z |-> 1],
-                            velocity |-> [x |-> 1, y |-> 1, z |-> 1],
+                            rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                            velocity |-> [x |-> 0, y |-> 0, z |-> 0],
                             aggregate_group |-> 0,
                             synced_vars |-> <<>> ])
     or
@@ -116,7 +129,7 @@ BEGIN
 END
 
 (* Specification combining initialization and all possible operations *)
-Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick]_<<players, objects, event_queue, last_timestamp>>
+Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec]_<<players, objects, event_queue, last_timestamp>>
 
 (* Invariant ensuring the number of players does not exceed the maximum allowed *)
 PlayersCountInvariant == Len(players) <= MAX_PLAYERS
@@ -150,7 +163,7 @@ SitOnChair(pid, cid) ==
                   ]
     /\ objects' = [ c \in objects:
                       IF c.id = cid THEN
-                          [ c EXCEPT !.aggregate_group = pid ]
+                          [ c EXCEPT !.state.aggregate_group = pid ]
                       ELSE
                           c
                   ]
