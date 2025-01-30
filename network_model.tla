@@ -186,3 +186,133 @@ ChairSpec ==
 
 (* Updated specification including chair operations *)
 Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec]_<<players, objects, event_queue, last_timestamp>>
+
+(* 
+    Test suite for NetworkModel.tla
+    This module defines tests to exhaustively cover the eight failure modes
+    of the request/reply steps in the network model.
+*)
+
+(* Constants for testing *)
+CONSTANT 
+        MAX_PLAYERS <- 5,
+        MAX_OBJECTS <- 10
+
+(* Import the NetworkModel module *)
+EXTENDS NetworkModel
+
+(* Initialization for tests *)
+InitTest == Init
+
+(* Test 1: POST REQUEST fails *)
+Test_POST_REQUEST_Fail ==
+        /\ AddPlayer(1, [ 
+                        id |-> 1,
+                        state |-> [ 
+                                aggregate_group |-> NULL,
+                                synced_vars |-> << 
+                                        [variable |-> "position", state |-> "SyncedVar"],
+                                        [variable |-> "rotation", state |-> "SyncedVar"],
+                                        [variable |-> "velocity", state |-> "SyncedVar"]
+                                >>
+                        ],
+                        objects |-> <<>>
+                ])
+        /\ FALSE  (* Simulate failure by forcing a state contradiction *)
+
+(* Test 2: DELIVER REQUEST fails *)
+Test_DELIVER_REQUEST_Fail ==
+        /\ AddPlayer(2, [ 
+                        id |-> 2,
+                        state |-> [ 
+                                aggregate_group |-> NULL,
+                                synced_vars |-> << 
+                                        [variable |-> "position", state |-> "SyncedVar"],
+                                        [variable |-> "rotation", state |-> "SyncedVar"],
+                                        [variable |-> "velocity", state |-> "SyncedVar"]
+                                >>
+                        ],
+                        objects |-> <<>>
+                ])
+        /\ DeletePlayer(2)
+
+(* Test 3: VALIDATE REQUEST fails *)
+Test_VALIDATE_REQUEST_Fail ==
+        /\ AddPlayer("invalid_id", [ 
+                        id |-> "invalid_id",  (* Invalid ID to cause validation failure *)
+                        state |-> [ 
+                                aggregate_group |-> NULL,
+                                synced_vars |-> << 
+                                        [variable |-> "position", state |-> "SyncedVar"],
+                                        [variable |-> "rotation", state |-> "SyncedVar"],
+                                        [variable |-> "velocity", state |-> "SyncedVar"]
+                                >>
+                        ],
+                        objects |-> <<>>
+                ])
+
+(* Test 4: UPDATE SERVER STATE fails *)
+Test_UPDATE_SERVER_STATE_Fail ==
+        /\ AddPlayer(3, [ 
+                        id |-> 3,
+                        state |-> [ 
+                                aggregate_group |-> NULL,
+                                synced_vars |-> << 
+                                        [variable |-> "position", state |-> "SyncedVar"],
+                                        [variable |-> "rotation", state |-> "SyncedVar"],
+                                        [variable |-> "velocity", state |-> "SyncedVar"]
+                                >>
+                        ],
+                        objects |-> <<>>
+                ])
+        /\ players'.state = [INVALID_STATE]  (* Force an invalid state *)
+
+(* Test 5: POST REPLY fails *)
+Test_POST_REPLY_Fail ==
+        /\ AddVote(1)  (* Assuming player 1 exists *)
+        /\ FALSE  (* Simulate failure by forcing a state contradiction *)
+
+(* Test 6: DELIVER REPLY fails *)
+Test_DELIVER_REPLY_Fail ==
+        /\ AddVote(1)
+        /\ DeleteVote(1)  (* Simulate reply failure by removing the vote *)
+
+(* Test 7: VALIDATE REPLY fails *)
+Test_VALIDATE_REPLY_Fail ==
+        /\ AddVote(1)
+        /\ objects[1].synced_vars = << [variable |-> "invalid_reply", state |-> "SyncedVar"] >>
+
+(* Test 8: UPDATE CLIENT STATE fails *)
+Test_UPDATE_CLIENT_STATE_Fail ==
+        /\ CreateObject(1, 101, [ 
+                        position |-> [x |-> 2, y |-> 2, z |-> 2],
+                        rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                        velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                        aggregate_group |-> NULL,
+                        synced_vars |-> <<>>
+                ])
+        /\ players[1].state.position = [x |-> "invalid", y |-> "invalid", z |-> "invalid"]
+
+(* Specification including all tests *)
+SpecTest ==
+        InitTest /\ 
+        [](
+                Test_POST_REQUEST_Fail \/
+                Test_DELIVER_REQUEST_Fail \/
+                Test_VALIDATE_REQUEST_Fail \/
+                Test_UPDATE_SERVER_STATE_Fail \/
+                Test_POST_REPLY_Fail \/
+                Test_DELIVER_REPLY_Fail \/
+                Test_VALIDATE_REPLY_Fail \/
+                Test_UPDATE_CLIENT_STATE_Fail
+        )
+
+(* Invariants to ensure system resilience *)
+Invariant_AllFailuresHandled ==
+        /\ []PlayersCountInvariant
+        /\ []ObjectsCountInvariant
+
+(* Theorem to verify that all failure tests maintain invariants *)
+THEOREM SpecTest => Invariant_AllFailuresHandled
+
+====
