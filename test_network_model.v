@@ -36,18 +36,24 @@ Module TestNetworkModel.
         lia.
     Qed.
 
-    (* Test Upvoting a Player's Velocity *)
-    Lemma add_vote_updates_velocity :
+    (* Test Upvoting a Player's Vote *)
+    Lemma add_vote_updates_vote :
         let st := init_global_state in
         let st' := add_vote st 0 in
-        velocity (snd (List.nth 0 st'.players (0, {| position := zero_vector; velocity := zero_vector; aggregate_group := None |}))) = {| x := 1; y := 0; z := 0 |}.
+        lookup_synced_var "vote" (snd (List.nth 0 st'.players (0, {| position := zero_vector; velocity := zero_vector; aggregate_group := None; synced_vars := [] |}))) = Some SyncedVar.
     Proof.
         unfold init_global_state, add_vote, PlayerState, zero_vector.
         simpl.
         destruct (0 =? 0) eqn:H.
         - rewrite Nat.eqb_eq in H. subst.
-            simpl. reflexivity.
+            simpl.
+            unfold lookup_synced_var.
+            exists "vote". reflexivity.
         - discriminate.
     Qed.
+
+    (* Helper Function to Lookup Synced Variables *)
+    Definition lookup_synced_var (key : string) (vars : list (string * SandboxSynced)) : option SandboxSynced :=
+        find (fun var => if String.eqb (fst var) key then true else false) vars >>= (fun pair => Some (snd pair)).
 
 End TestNetworkModel.

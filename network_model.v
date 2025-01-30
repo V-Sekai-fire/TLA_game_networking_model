@@ -64,7 +64,8 @@ Record NetworkEventState := {
 Record PlayerState := {
         position : Vector3;
         velocity : Vector3;
-        aggregate_group : option nat
+        aggregate_group : option nat;
+        synced_vars : list (string * SandboxSynced)
 }.
 
 (* Global State *)
@@ -123,7 +124,8 @@ Import NetworkModel.GameNetworkModel.
 Definition init_player (id : nat) : nat * PlayerState :=
     (id, {| position := zero_vector;
                     velocity := zero_vector;
-                    aggregate_group := None |}).
+                    aggregate_group := None;
+                    synced_vars := [] |}).
 
 Definition init_global_state : GlobalState :=
     {|
@@ -162,7 +164,13 @@ Fixpoint simulate (steps : nat) (cs : CombinedState) : CombinedState :=
 
     Definition add_vote (st : GlobalState) (player_id : nat) : GlobalState :=
         {|
-            players := map (fun p => if fst p = player_id then (fst p, {| p.(position) with velocity := {| x := p.(velocity).(x) + 1; y := p.(velocity).(y); z := p.(velocity).(z) |} |}) else p) st.(players);
+            players := map (fun p => 
+                if fst p = player_id 
+                then (fst p, 
+                      {| p with 
+                            synced_vars := ("vote", SyncedVar) :: filter (fun var => fst var <> "vote") p.(synced_vars)
+                      |}) 
+                else p) st.(players);
             event_queue := st.(event_queue);
             last_timestamp := st.(last_timestamp)
         |}.
