@@ -6,10 +6,10 @@ CONSTANT MAX_PLAYERS, MAX_OBJECTS
 (* Define the types for synchronization variables *)
 TYPE SandboxSynced = {"SyncedVar", "LocalVar"}
 
-(* Define the state of a network event *)
+(* Define the state of a network event without payload *)
 TYPE NetworkEvent == [ 
     eventType: {"AddPlayer", "DeletePlayer", "CreateObject", "DeleteObject", "AddVote", "MoveChair", "SitOnChair"},
-    payload: STRING
+    syncedVars: Seq([variable: String, value: ANY, state: SandboxSynced])
 ]
 
 (* Define the state of an object, including its aggregation group and synchronized variables *)
@@ -32,7 +32,7 @@ TYPE PlayerState == [
     objects: Seq([id: Nat, state: ObjectState])
 ]
 
-(* Define the global state variables *)
+(* Global state variables *)
 VARIABLES 
     players,         \* Sequence of PlayerState *
     objects,         \* Sequence of ObjectState *
@@ -47,30 +47,30 @@ Init ==
     /\ last_timestamp = <<>>
 
 (* Operation to add a new player *)
-AddPlayer(pid, pState) ==
+AddPlayer(pState) ==
     /\ Len(players) < MAX_PLAYERS
     /\ players' = players \o << pState >>
-    /\ event_queue' = Append(event_queue, [eventType |-> "AddPlayer", payload |-> ToString(pid)])
+    /\ event_queue' = Append(event_queue, [eventType |-> "AddPlayer", syncedVars |-> <<>>])
     /\ UNCHANGED <<objects, last_timestamp>>
 
 (* Operation to remove an existing player *)
 DeletePlayer(pid) ==
     /\ players' = [ p \in players : p.id /= pid ]
-    /\ event_queue' = Append(event_queue, [eventType |-> "DeletePlayer", payload |-> ToString(pid)])
+    /\ event_queue' = Append(event_queue, [eventType |-> "DeletePlayer", syncedVars |-> <<>>])
     /\ UNCHANGED <<objects, last_timestamp>>
 
 (* Operation to create a new object for a player *)
-CREATE CreateObject(pid, oid, oState) ==
+CreateObject(pid, oid, oState) ==
     /\ LET player == [p \in players : p.id = pid]
     /\ Len(player.objects) < MAX_OBJECTS
     /\ player.objects' = player.objects \o << [id |-> oid, state |-> oState ] >>
-    /\ event_queue' = Append(event_queue, [eventType |-> "CreateObject", payload |-> ToString(oid)])
+    /\ event_queue' = Append(event_queue, [eventType |-> "CreateObject", syncedVars |-> <<>>])
     /\ UNCHANGED <<players, objects, last_timestamp>>
 
 (* Operation to delete an existing object *)
 DeleteObject(oid) ==
     /\ objects' = [ o \in objects : o.id /= oid ]
-    /\ event_queue' = Append(event_queue, [eventType |-> "DeleteObject", payload |-> ToString(oid)])
+    /\ event_queue' = Append(event_queue, [eventType |-> "DeleteObject", syncedVars |-> <<>>])
     /\ UNCHANGED <<players, last_timestamp>>
 
 (* Operation to add a vote to an object *)
@@ -83,17 +83,38 @@ AddVote(oid) ==
             ELSE 
                 o
     ]
-    /\ event_queue' = Append(event_queue, [eventType |-> "AddVote", payload |-> ToString(oid)])
+    /\ event_queue' = Append(event_queue, [eventType |-> "AddVote", syncedVars |-> <<>>])
     /\ UNCHANGED <<players, last_timestamp>>
 
-(* Operation to process a network event *)
+(* Operation to process a network event without payload *)
 ProcessNetworkEvent(event) ==
     CASE event.eventType OF
-        "AddPlayer" -> AddPlayer(ToNat(event.payload), [ ... ]) \* Define appropriate state
-        "DeletePlayer" -> DeletePlayer(ToNat(event.payload))
-        "CreateObject" -> CreateObject(... ) \* Define appropriate parameters
-        "DeleteObject" -> DeleteObject(ToNat(event.payload))
-        "AddVote" -> AddVote(ToNat(event.payload))
+        "AddPlayer" -> 
+            /\ SOME sv \in event.syncedVars: sv.variable = "id"
+            /\ AddPlayer([ id |-> sv.value,
+                           state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
+                                      rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                                      velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                                      aggregate_group |-> NULL,
+                                      synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
+                                                    [variable |-> "rotation", state |-> "SyncedVar"],
+                                                    [variable |-> "velocity", state |-> "SyncedVar"] >>
+                           ],
+                           objects |-> <<>> ])
+        "DeletePlayer" -> 
+            /\ SOME sv \in event.syncedVars: sv.variable = "id"
+            /\ DeletePlayer(sv.value)
+        "CreateObject" -> 
+            /\ SOME sv1 \in event.syncedVars: sv1.variable = "playerId"
+            /\ SOME sv2 \in event.syncedVars: sv2.variable = "objectId"
+            /\ SOME sv3 \in event.syncedVars: sv3.variable = "initialState"
+            /\ CreateObject(sv1.value, sv2.value, sv3.value)
+        "DeleteObject" -> 
+            /\ SOME sv \in event.syncedVars: sv.variable = "objectId"
+            /\ DeleteObject(sv.value)
+        "AddVote" -> 
+            /\ SOME sv \in event.syncedVars: sv.variable = "objectId"
+            /\ AddVote(sv.value)
         OTHER -> UNCHANGED
     END
 
@@ -106,16 +127,16 @@ BEGIN
   while TRUE do
     either
       \* Add a new player with default state *
-      AddPlayer(NewID, [ id |-> NewID,
-                        state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
-                                   rotation |-> [x |-> 0, y |-> 0, z |-> 0],
-                                   velocity |-> [x |-> 0, y |-> 0, z |-> 0],
-                                   aggregate_group |-> NULL,
-                                   synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
-                                                     [variable |-> "rotation", state |-> "SyncedVar"],
-                                                     [variable |-> "velocity", state |-> "SyncedVar"] >>
-                            ],
-                        objects |-> <<>> ])
+      AddPlayer([ id |-> NewID,
+                  state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
+                             rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                             velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                             aggregate_group |-> NULL,
+                             synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
+                                           [variable |-> "rotation", state |-> "SyncedVar"],
+                                           [variable |-> "velocity", state |-> "SyncedVar"] >>
+                  ],
+                  objects |-> <<>> ])
     or
       \* Remove an existing player if any exist *
       IF Len(players) > 0 THEN
