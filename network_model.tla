@@ -1,7 +1,7 @@
 ---- MODULE NetworkModel ----
 EXTENDS Naturals, Sequences, TLC
 
-CONSTANT MAX_PLAYERS, MAX_OBJECTS
+CONSTANT NUM_SERVERS, MAX_PLAYERS, MAX_OBJECTS
 
 (* Define the types for synchronization variables *)
 TYPE SandboxSynced = {"SyncedVar", "LocalVar"}
@@ -14,6 +14,7 @@ TYPE NetworkEvent == [
 
 (* Define the state of an object, including its aggregation group and synchronized variables *)
 TYPE ObjectState == [
+    id: Nat,
     aggregate_group: Nat \/ NULL,
     synced_vars: Seq([variable: String, state: SandboxSynced])
 ]
@@ -29,137 +30,154 @@ TYPE PlayerState == [
             [variable |-> "velocity", state |-> "SyncedVar"]
         >>
     ],
-    objects: Seq([id: Nat, state: ObjectState])
+    objects: Seq(ObjectState)
+]
+
+(* Define the state of a server *)
+TYPE ServerState == [ 
+    id: Nat,
+    players: Seq(PlayerState),
+    objects: Seq(ObjectState)
 ]
 
 (* Global state variables *)
 VARIABLES 
-    players,         \* Sequence of PlayerState *
-    objects,         \* Sequence of ObjectState *
+    servers,         \* Sequence of ServerState *
     event_queue,     \* Sequence of NetworkEvent *
     last_timestamp   \* Sequence of records with player ID and timestamp *
 
 (* Initialization of the system state *)
 Init == 
-    /\ players = <<>>
-    /\ objects = <<>>
+    /\ servers = [i \in 1..NUM_SERVERS |-> [id |-> i, players |-> <<>>, objects |-> <<>>]]
     /\ event_queue = <<>>
     /\ last_timestamp = <<>>
 
-(* Operation to add a new player *)
-AddPlayer(pState) ==
-    /\ Len(players) < MAX_PLAYERS
-    /\ players' = players \o << pState >>
+(* Operation to add a new player to a specific server *)
+AddPlayer(serverID, pState) ==
+    /\ serverID \in 1..NUM_SERVERS
+    /\ Len(servers[serverID].players) < MAX_PLAYERS
+    /\ servers' = [servers EXCEPT ![serverID].players = @ \o << pState >>]
     /\ event_queue' = Append(event_queue, [eventType |-> "AddPlayer", syncedVars |-> <<>>])
-    /\ UNCHANGED <<objects, last_timestamp>>
+    /\ UNCHANGED <<servers EXCEPT ![serverID].players, last_timestamp>>
 
-(* Operation to remove an existing player *)
-DeletePlayer(pid) ==
-    /\ players' = [ p \in players : p.id /= pid ]
+(* Operation to remove an existing player from a specific server *)
+DeletePlayer(serverID, pid) ==
+    /\ serverID \in 1..NUM_SERVERS
+    /\ servers'[serverID].players = [ p \in servers[serverID].players : p.id /= pid ]
     /\ event_queue' = Append(event_queue, [eventType |-> "DeletePlayer", syncedVars |-> <<>>])
-    /\ UNCHANGED <<objects, last_timestamp>>
+    /\ UNCHANGED <<servers EXCEPT ![serverID].players, last_timestamp>>
 
-(* Operation to create a new object for a player *)
-CreateObject(pid, oid, oState) ==
-    /\ LET player == [p \in players : p.id = pid]
+(* Operation to create a new object for a player on a specific server *)
+CreateObject(serverID, pid, oid, oState) ==
+    /\ serverID \in 1..NUM_SERVERS
+    /\ LET player == [p \in servers[serverID].players : p.id = pid]
     /\ Len(player.objects) < MAX_OBJECTS
-    /\ player.objects' = player.objects \o << [id |-> oid, state |-> oState ] >>
+    /\ servers'[serverID].players = [p \in servers[serverID].players | p.id /= pid 
+        \/ [p EXCEPT !.objects = @ \o << [id |-> oid, state |-> oState ] >>]]
     /\ event_queue' = Append(event_queue, [eventType |-> "CreateObject", syncedVars |-> <<>>])
-    /\ UNCHANGED <<players, objects, last_timestamp>>
+    /\ UNCHANGED <<servers EXCEPT ![serverID].players, last_timestamp>>
 
-(* Operation to delete an existing object *)
-DeleteObject(oid) ==
-    /\ objects' = [ o \in objects : o.id /= oid ]
+(* Operation to delete an existing object from a specific server *)
+DeleteObject(serverID, oid) ==
+    /\ serverID \in 1..NUM_SERVERS
+    /\ servers'[serverID].objects = [ o \in servers[serverID].objects : o.id /= oid ]
     /\ event_queue' = Append(event_queue, [eventType |-> "DeleteObject", syncedVars |-> <<>>])
-    /\ UNCHANGED <<players, last_timestamp>>
+    /\ UNCHANGED <<servers EXCEPT ![serverID].objects, last_timestamp>>
 
-(* Operation to add a vote to an object *)
-AddVote(oid) ==
-    /\ EXISTS o \in objects: o.id = oid
-    /\ objects' = [ 
-        o \in objects : 
+(* Operation to add a vote to an object on a specific server *)
+AddVote(serverID, oid) ==
+    /\ serverID \in 1..NUM_SERVERS
+    /\ EXISTS o \in servers[serverID].objects: o.id = oid
+    /\ servers'[serverID].objects = [ 
+        o \in servers[serverID].objects : 
             IF o.id = oid THEN 
-                [ o EXCEPT !.state.synced_vars = Append(Seq([variable |-> "vote", state |-> "SyncedVar"]), {x \in o.state.synced_vars | x.variable /= "vote"}) ]
+                [ o EXCEPT !.state.synced_vars = Append(@, << [variable |-> "vote", state |-> "SyncedVar"] >>) ]
             ELSE 
                 o
     ]
     /\ event_queue' = Append(event_queue, [eventType |-> "AddVote", syncedVars |-> <<>>])
-    /\ UNCHANGED <<players, last_timestamp>>
+    /\ UNCHANGED <<servers EXCEPT ![serverID].objects, last_timestamp>>
 
 (* Operation to process a network event without payload *)
 ProcessNetworkEvent(event) ==
     CASE event.eventType OF
         "AddPlayer" -> 
-            /\ SOME sv \in event.syncedVars: sv.variable = "id"
-            /\ AddPlayer([ id |-> sv.value,
-                           state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
-                                      rotation |-> [x |-> 0, y |-> 0, z |-> 0],
-                                      velocity |-> [x |-> 0, y |-> 0, z |-> 0],
-                                      aggregate_group |-> NULL,
-                                      synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
-                                                    [variable |-> "rotation", state |-> "SyncedVar"],
-                                                    [variable |-> "velocity", state |-> "SyncedVar"] >>
-                           ],
-                           objects |-> <<>> ])
+            /\ SOME sv \in event.syncedVars: sv.variable = "serverID" /\ sv.variable = "id"
+            /\ AddPlayer(sv.value, [ id |-> sv.value,
+                                     state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
+                                                rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                                                velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                                                aggregate_group |-> NULL,
+                                                synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
+                                                              [variable |-> "rotation", state |-> "SyncedVar"],
+                                                              [variable |-> "velocity", state |-> "SyncedVar"] >>
+                                     ],
+                                     objects |-> <<>> ])
         "DeletePlayer" -> 
-            /\ SOME sv \in event.syncedVars: sv.variable = "id"
-            /\ DeletePlayer(sv.value)
+            /\ SOME sv \in event.syncedVars: sv.variable = "serverID" /\ sv.variable = "id"
+            /\ DeletePlayer(sv.value, sv.value)
         "CreateObject" -> 
-            /\ SOME sv1 \in event.syncedVars: sv1.variable = "playerId"
-            /\ SOME sv2 \in event.syncedVars: sv2.variable = "objectId"
-            /\ SOME sv3 \in event.syncedVars: sv3.variable = "initialState"
-            /\ CreateObject(sv1.value, sv2.value, sv3.value)
+            /\ SOME sv1 \in event.syncedVars: sv1.variable = "serverID"
+            /\ SOME sv2 \in event.syncedVars: sv2.variable = "playerId"
+            /\ SOME sv3 \in event.syncedVars: sv3.variable = "objectId"
+            /\ SOME sv4 \in event.syncedVars: sv4.variable = "initialState"
+            /\ CreateObject(sv1.value, sv2.value, sv3.value, sv4.value)
         "DeleteObject" -> 
-            /\ SOME sv \in event.syncedVars: sv.variable = "objectId"
-            /\ DeleteObject(sv.value)
+            /\ SOME sv1 \in event.syncedVars: sv1.variable = "serverID"
+            /\ SOME sv2 \in event.syncedVars: sv2.variable = "objectId"
+            /\ DeleteObject(sv1.value, sv2.value)
         "AddVote" -> 
-            /\ SOME sv \in event.syncedVars: sv.variable = "objectId"
-            /\ AddVote(sv.value)
+            /\ SOME sv1 \in event.syncedVars: sv1.variable = "serverID"
+            /\ SOME sv2 \in event.syncedVars: sv2.variable = "objectId"
+            /\ AddVote(sv1.value, sv2.value)
         OTHER -> UNCHANGED
     END
 
 (* Tick operation representing the passage of time with no state changes *)
 Tick ==
-    /\ UNCHANGED <<players, objects, event_queue, last_timestamp>>
+    /\ UNCHANGED <<servers, event_queue, last_timestamp>>
 
 (* PlusCal Algorithm for state transitions *)
 BEGIN
   while TRUE do
     either
-      \* Add a new player with default state *
-      AddPlayer([ id |-> NewID,
-                  state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
-                             rotation |-> [x |-> 0, y |-> 0, z |-> 0],
-                             velocity |-> [x |-> 0, y |-> 0, z |-> 0],
-                             aggregate_group |-> NULL,
-                             synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
-                                           [variable |-> "rotation", state |-> "SyncedVar"],
-                                           [variable |-> "velocity", state |-> "SyncedVar"] >>
-                  ],
-                  objects |-> <<>> ])
+      \* Add a new player with default state to a random server *
+      AddPlayer(RandomServerID, [ id |-> NewID,
+                                   state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
+                                              rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                                              velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                                              aggregate_group |-> NULL,
+                                              synced_vars |-> << [variable |-> "position", state |-> "SyncedVar"],
+                                                            [variable |-> "rotation", state |-> "SyncedVar"],
+                                                            [variable |-> "velocity", state |-> "SyncedVar"] >>
+                                   ],
+                                   objects |-> <<>> ])
     or
-      \* Remove an existing player if any exist *
-      IF Len(players) > 0 THEN
-        /\ LET pid == FIRST(players).id IN DeletePlayer(pid)
+      \* Remove an existing player from a random server if any exist *
+      IF EXISTS s \in servers: Len(s.players) > 0 THEN
+        /\ LET server == CHOOSE s \in servers: Len(s.players) > 0
+           /\ pid == FIRST(server.players).id IN DeletePlayer(server.id, pid)
       ELSE
         SKIP
     or
-      \* Add a vote to an existing object if any exist *
-      IF Len(objects) > 0 THEN
-        /\ LET oid == FIRST(objects).id IN AddVote(oid)
+      \* Add a vote to an existing object on a random server if any exist *
+      IF EXISTS s \in servers: Len(s.objects) > 0 THEN
+        /\ LET server == CHOOSE s \in servers: Len(s.objects) > 0
+           /\ oid == FIRST(server.objects).id IN AddVote(server.id, oid)
       ELSE
         SKIP
     or
-      \* Create a new object with default state *
-      CreateObject(NewOID,  [ position |-> [x |-> 1, y |-> 1, z |-> 1],
-                            rotation |-> [x |-> 0, y |-> 0, z |-> 0],
-                            velocity |-> [x |-> 0, y |-> 0, z |-> 0],
-                            aggregate_group |-> 0,
-                            synced_vars |-> <<>> ])
+      \* Create a new object with default state on a random server *
+      CreateObject(RandomServerID, NewPID, NewOID, [ position |-> [x |-> 1, y |-> 1, z |-> 1],
+                                                    rotation |-> [x |-> 0, y |-> 0, z |-> 0],
+                                                    velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                                                    aggregate_group |-> 0,
+                                                    synced_vars |-> <<>> ])
     or
-      \* Delete an existing object if any exist *
-      IF Len(objects) > 0 THEN
-        /\ LET oid == FIRST(objects).id IN DeleteObject(oid)
+      \* Delete an existing object from a random server if any exist *
+      IF EXISTS s \in servers: Len(s.objects) > 0 THEN
+        /\ LET server == CHOOSE s \in servers: Len(s.objects) > 0
+           /\ oid == FIRST(server.objects).id IN DeleteObject(server.id, oid)
       ELSE
         SKIP
     or
@@ -175,13 +193,16 @@ BEGIN
 END
 
 (* Specification combining initialization and all possible operations *)
-Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec \/ ProcessNetworkEvent]_<<players, objects, event_queue, last_timestamp>>
+Spec ==
+    Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec \/ ProcessNetworkEvent]_<<servers, event_queue, last_timestamp>>
 
-(* Invariant ensuring the number of players does not exceed the maximum allowed *)
-PlayersCountInvariant == Len(players) <= MAX_PLAYERS
+(* Invariant ensuring the number of players does not exceed the maximum allowed on any server *)
+PlayersCountInvariant == 
+    \A s \in servers : Len(s.players) <= MAX_PLAYERS
 
-(* Invariant ensuring the number of objects does not exceed the maximum allowed *)
-ObjectsCountInvariant == Len(objects) <= MAX_OBJECTS
+(* Invariant ensuring the number of objects does not exceed the maximum allowed on any server *)
+ObjectsCountInvariant == 
+    \A s \in servers : Len(s.objects) <= MAX_OBJECTS
 
 (* Theorem stating that the specifications maintain the invariants *)
 THEOREM Spec => []PlayersCountInvariant /\ []ObjectsCountInvariant
