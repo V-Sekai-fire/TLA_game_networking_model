@@ -4,7 +4,7 @@ EXTENDS Naturals, Sequences, TLC
 CONSTANT NUM_SERVERS, MAX_PLAYERS, MAX_OBJECTS
 
 (* Define the types for synchronization variables *)
-TYPE SandboxSynced = {"SyncedVar", "LocalVar"}
+TYPE SandboxSynced = {"SyncedVar"}
 
 (* Define the state of a network event without payload *)
 TYPE NetworkEvent == [ 
@@ -200,3 +200,4 @@ ObjectsCountInvariant ==
 THEOREM Spec => []PlayersCountInvariant /\ []ObjectsCountInvariant
 
 ====
+
