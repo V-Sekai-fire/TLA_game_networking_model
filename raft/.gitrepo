@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/ongardie/raft.tla.git
+	branch = master
+	commit = 5f55322c12d3b657a128818754696fceb93f22ec
+	parent = d374389da50ae58176cbe25de2a0fe3a5a9aeef9
+	method = merge
+	cmdver = 0.4.9
