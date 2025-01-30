@@ -23,7 +23,6 @@ VARIABLES
     players,         \* Seq of PlayerState *
     event_queue,     \* Seq of NetworkEventState *
     last_timestamp   \* Seq of [id: Nat, timestamp: Int] *
-    last_timestamp   \* Seq of [id: Nat, timestamp: Int] *
 
 (* Initialization *)
 Init == 
@@ -55,10 +54,6 @@ DeleteObject(oid) ==
     /\ objects' = [ o \in objects : o.id /= oid ]
     /\ objects'.synced_vars = Append(objects.synced_vars, << "DeleteObject", ToString(oid) >>)
     /\ UNCHANGED <<players, event_queue, last_timestamp>>
-DeleteObject(oid) ==
-    /\ objects' = [ o \in objects : o.id /= oid ]
-    /\ UNCHANGED <<players, event_queue, last_timestamp>>
-
 (* AddVote Operation *)
 AddVote(oid) ==
     /\ EXISTS o \in objects: o.id = oid
