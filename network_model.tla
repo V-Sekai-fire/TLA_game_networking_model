@@ -84,20 +84,6 @@ DeleteObject(serverID, oid) ==
     /\ event_queue' = Append(event_queue, [eventType |-> "DeleteObject", syncedVars |-> <<>>])
     /\ UNCHANGED <<servers EXCEPT ![serverID].objects, last_timestamp>>
 
-(* Operation to add a vote to an object on a specific server *)
-AddVote(serverID, oid) ==
-    /\ serverID \in 1..NUM_SERVERS
-    /\ EXISTS o \in servers[serverID].objects: o.id = oid
-    /\ servers'[serverID].objects = [ 
-        o \in servers[serverID].objects : 
-            IF o.id = oid THEN 
-                [ o EXCEPT !.state.synced_vars = Append(@, << [variable |-> "vote", state |-> "SyncedVar"] >>) ]
-            ELSE 
-                o
-    ]
-    /\ event_queue' = Append(event_queue, [eventType |-> "AddVote", syncedVars |-> <<>>])
-    /\ UNCHANGED <<servers EXCEPT ![serverID].objects, last_timestamp>>
-
 (* Operation to process a network event without payload *)
 ProcessNetworkEvent(event) ==
     CASE event.eventType OF
@@ -126,12 +112,18 @@ ProcessNetworkEvent(event) ==
             /\ SOME sv1 \in event.syncedVars: sv1.variable = "serverID"
             /\ SOME sv2 \in event.syncedVars: sv2.variable = "objectId"
             /\ DeleteObject(sv1.value, sv2.value)
-        "AddVote" -> 
-            /\ SOME sv1 \in event.syncedVars: sv1.variable = "serverID"
-            /\ SOME sv2 \in event.syncedVars: sv2.variable = "objectId"
-            /\ AddVote(sv1.value, sv2.value)
-        OTHER -> UNCHANGED
+        OTHER -> 
+            /\ HandleSyncedVars(event.syncedVars)
     END
+
+HandleSyncedVars(syncedVars) ==
+    /\ \A sv \in syncedVars: 
+        CASE sv.variable OF
+            "vote" -> 
+                /\ EXISTS o \in servers[sv.value].objects: o.id = sv.value
+                /\ servers' = [servers EXCEPT ![sv.value].objects = Append(@, <<sv>>)]
+            OTHER -> UNCHANGED
+        END
 
 (* Tick operation representing the passage of time with no state changes *)
 Tick ==
@@ -194,7 +186,7 @@ END
 
 (* Specification combining initialization and all possible operations *)
 Spec ==
-    Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec \/ ProcessNetworkEvent]_<<servers, event_queue, last_timestamp>>
+    Init /\ [][AddPlayer \/ DeletePlayer \/ CreateObject \/ DeleteObject \/ Tick \/ ChairSpec \/ ProcessNetworkEvent]_<<servers, event_queue, last_timestamp>>
 
 (* Invariant ensuring the number of players does not exceed the maximum allowed on any server *)
 PlayersCountInvariant == 
