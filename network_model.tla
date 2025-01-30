@@ -1,68 +1,88 @@
 ---- MODULE NetworkModel ----
 EXTENDS Naturals, Sequences, TLC
 
-CONSTANT MAX_PLAYERS
+CONSTANT MAX_PLAYERS, MAX_OBJECTS
 
 (* Define SandboxSynced *)
 TYPE SandboxSynced = {"SyncedVar", "LocalVar"}
 
-(* Define PlayerState *)
-TYPE PlayerState == [ 
+(* Define ObjectState *)
+TYPE ObjectState == [
     position: [x: Real, y: Real, z: Real],
     velocity: [x: Real, y: Real, z: Real],
     aggregate_group: Nat \/ NULL,
     synced_vars: Seq([variable: String, state: SandboxSynced])
 ]
 
+(* Define PlayerState *)
+TYPE PlayerState == [ 
+    id: Nat,
+    state: ObjectState,
+    objects: Seq([id: Nat, state: ObjectState])
+]
 (* Define GlobalState *)
 VARIABLES 
-    players,         \* Seq of [id: Nat, state: PlayerState] *
+    players,         \* Seq of PlayerState *
     event_queue,     \* Seq of NetworkEventState *
+    last_timestamp   \* Seq of [id: Nat, timestamp: Int] *
     last_timestamp   \* Seq of [id: Nat, timestamp: Int] *
 
 (* Initialization *)
 Init == 
     /\ players = <<>>
+    /\ objects = <<>>
     /\ event_queue = <<>>
     /\ last_timestamp = <<>>
 
 (* AddPlayer Operation *)
 AddPlayer(pid, pState) ==
     /\ Len(players) < MAX_PLAYERS
-    /\ players' = players \o << [id |-> pid, state |-> pState] >>
-    /\ UNCHANGED <<event_queue, last_timestamp>>
+    /\ players' = players \o << pState >>
+    /\ UNCHANGED <<objects, event_queue, last_timestamp>>
 
 (* DeletePlayer Operation *)
 DeletePlayer(pid) ==
     /\ players' = [ p \in players : p.id /= pid ]
-    /\ UNCHANGED <<event_queue, last_timestamp>>
+    /\ UNCHANGED <<objects, event_queue, last_timestamp>>
+
+(* CreateObject Operation *)
+CREATE CreateObject(pid, oid, oState) ==
+    /\ LET player = [p \in players : p.id = pid]
+    /\ Len(player.objects) < MAX_OBJECTS
+    /\ player.objects' = player.objects \o << [id |-> oid, state |-> oState ] >>
+    /\ UNCHANGED <<players, event_queue, last_timestamp>>
+
+(* DeleteObject Operation *)
+DeleteObject(oid) ==
+    /\ objects' = [ o \in objects : o.id /= oid ]
+    /\ UNCHANGED <<players, event_queue, last_timestamp>>
 
 (* AddVote Operation *)
-AddVote(pid) ==
-    /\ EXISTS p \in players: p.id = pid
-    /\ players' = [ 
-        p \in players : 
-            IF p.id = pid THEN 
-                [ p EXCEPT !.state.synced_vars = Append(Seq(<< "vote", "SyncedVar" >>), {x \in p.state.synced_vars | x.variable /= "vote"}) ]
+AddVote(oid) ==
+    /\ EXISTS o \in objects: o.id = oid
+    /\ objects' = [ 
+        o \in objects : 
+            IF o.id = oid THEN 
+                [ o EXCEPT !.state.synced_vars = Append(Seq(<< "vote", "SyncedVar" >>), {x \in o.state.synced_vars | x.variable /= "vote"}) ]
             ELSE 
-                p
+                o
     ]
-    /\ UNCHANGED <<event_queue, last_timestamp>>
+    /\ UNCHANGED <<players, event_queue, last_timestamp>>
 
 (* Tick Operation *)
 Tick ==
-    /\ UNCHANGED <<players, event_queue, last_timestamp>>
+    /\ UNCHANGED <<players, objects, event_queue, last_timestamp>>
 
-(* PlusCal Algorithm *)
-(* The algorithm defines the possible actions in the system *)
+(* Updated PlusCal Algorithm *)
 BEGIN
   while TRUE do
     either
       \* Add a new player
-      AddPlayer(NewID, [ position |-> [x |-> 0, y |-> 0, z |-> 0],
-                        velocity |-> [x |-> 0, y |-> 0, z |-> 0],
-                        aggregate_group |-> NULL,
-                        synced_vars |-> <<>> ])
+      AddPlayer(NewID, [ id |-> NewID,
+                        state |-> [ position |-> [x |-> 0, y |-> 0, z |-> 0],
+                                   velocity |-> [x |-> 0, y |-> 0, z |-> 0],
+                                   aggregate_group |-> NULL,
+                                   synced_vars |-> <<>> ] ])
     or
       \* Delete an existing player
       IF Len(players) > 0 THEN
@@ -70,9 +90,21 @@ BEGIN
       ELSE
         SKIP
     or
-      \* Add a vote to a player
-      IF Len(players) > 0 THEN
-        /\ LET pid == FIRST(players).id IN AddVote(pid)
+      \* Add a vote to an object
+      IF Len(objects) > 0 THEN
+        /\ LET oid == FIRST(objects).id IN AddVote(oid)
+      ELSE
+        SKIP
+    or
+      \* Create a new object
+      CreateObject(NewOID, [ position |-> [x |-> 1, y |-> 1, z |-> 1],
+                            velocity |-> [x |-> 1, y |-> 1, z |-> 1],
+                            aggregate_group |-> 0,
+                            synced_vars |-> <<>> ])
+    or
+      \* Delete an existing object
+      IF Len(objects) > 0 THEN
+        /\ LET oid == FIRST(objects).id IN DeleteObject(oid)
       ELSE
         SKIP
     or
@@ -80,17 +112,17 @@ BEGIN
       Tick
   end while
 END
-----
 
 (* Specifications *)
-Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ Tick]_<<players, event_queue, last_timestamp>>
+Spec == Init /\ [][AddPlayer \/ DeletePlayer \/ AddVote \/ CreateObject \/ DeleteObject \/ Tick]_<<players, objects, event_queue, last_timestamp>>
 
 (* Invariant: Players count does not exceed MAX_PLAYERS *)
 PlayersCountInvariant == Len(players) <= MAX_PLAYERS
 
-=============================================================================
+(* Invariant: Objects count does not exceed MAX_OBJECTS *)
+ObjectsCountInvariant == Len(objects) <= MAX_OBJECTS
 
 (* Properties to Check *)
-THEOREM Spec => []PlayersCountInvariant
+THEOREM Spec => []PlayersCountInvariant /\ []ObjectsCountInvariant
 
-=============================================================================
+====
