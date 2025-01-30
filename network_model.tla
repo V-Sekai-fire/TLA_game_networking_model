@@ -60,7 +60,7 @@ AddVote(oid) ==
     /\ objects' = [ 
         o \in objects : 
             IF o.id = oid THEN 
-                [ o EXCEPT !.state.synced_vars = Append(Seq(<< "vote", "SyncedVar" >>), {x \in o.state.synced_vars | x.variable /= "vote"}) ]
+                [ o EXCEPT !.state.synced_vars = Append(Seq([variable |-> "vote", state |-> "SyncedVar"]), {x \in o.state.synced_vars | x.variable /= "vote"}) ]
             ELSE 
                 o
     ]
