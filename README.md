@@ -1,4 +1,4 @@
-# vsk-networking-model-coq
+# vsk-networking-model-checker
 
 ## Referenced works
 
