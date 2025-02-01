@@ -1,7 +1,5 @@
 # vsk-networking-model-checker
 
-Here’s the updated **table** with a **Communication Complexity** attribute added, along with **votes (0-100)** for all attributes. Higher scores indicate better performance or suitability.
-
 | **Proposal**                           | **Linearizability** | **Fault Tolerance** | **Space Complexity** | **Time Complexity** | **Complexity** | **Scalability** | **Communication Load** | **Communication Complexity** | **Use Case**                                                                 |
 | -------------------------------------- | ------------------- | ------------------- | -------------------- | ------------------- | -------------- | --------------- | ---------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
 | **Distributed Consensus Algorithm**    | ✅ (100)            | ✅ (100)            | High (30)            | High (40)           | High (30)      | High (90)       | High (30)              | High (30)                    | Strict linearizability and fault tolerance in distributed systems.           |
