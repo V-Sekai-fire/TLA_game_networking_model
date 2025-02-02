@@ -36,7 +36,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", "move_shard",
             "set_property", "move_subtree", "remove_property", 
-            "batch_update", "create_root", "remove_subtree", "batch_structure",
+            "batch_update", "create_root", "batch_structure",
             "move_child"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
@@ -119,26 +119,14 @@ ApplySceneOp(op) ==
                                 right_sibling |-> sceneState[target].right_sibling,
                                 properties |-> op.properties ]]
   [] op.type = "remove_node" ->
-        LET M == op.node IN
-        /\ sceneState[M].left_child = NULL  \* Precondition: no children
-        /\ LET XWithLeft == {X \in DOMAIN sceneState : sceneState[X].left_child = M} IN
-          LET YWithRight == {Y \in DOMAIN sceneState : sceneState[Y].right_sibling = M} IN
-          sceneState' = [ X \in DOMAIN sceneState \ {M} |->
-              IF X \in XWithLeft THEN
-                  [sceneState[X] EXCEPT !.left_child = sceneState[M].right_sibling]
-              ELSE IF X \in YWithRight THEN
-                  [sceneState[X] EXCEPT !.right_sibling = sceneState[M].right_sibling]
-              ELSE
-                  sceneState[X] ]
-  [] op.type = "remove_subtree" ->
-        LET node == op.node IN
-        LET descendants == Descendants(node) IN
-        /\ sceneState' = [n \in DOMAIN sceneState \ descendants |-> sceneState[n]]
-        /\ \A parent \in DOMAIN sceneState :
-            IF sceneState[parent].left_child \in descendants THEN
-                sceneState'[parent].left_child = NULL
-            ELSE IF sceneState[parent].right_sibling \in descendants THEN
-                sceneState'[parent].right_sibling = NULL
+      LET node == op.node IN
+      LET descendants == Descendants(node) IN
+      /\ sceneState' = [n \in DOMAIN sceneState \ descendants |-> sceneState[n]]
+      /\ \A parent \in DOMAIN sceneState :
+          IF sceneState[parent].left_child \in descendants THEN
+              sceneState'[parent].left_child = NULL
+          ELSE IF sceneState[parent].right_sibling \in descendants THEN
+              sceneState'[parent].right_sibling = NULL
   [] op.type = "set_property" ->
         sceneState' = [sceneState EXCEPT
                       ![op.node].properties[op.key] = op.value ]
@@ -307,7 +295,7 @@ TransactionAtomicity ==
             \A op \in txn.ops:
                 CASE op.type \in {"add_child", "add_sibling", "create_root"} ->
                     op.new_node \in DOMAIN sceneState
-                [] op.type = "remove_node" \/ op.type = "remove_subtree" ->
+                [] op.type = "remove_node" ->
                     op.node \notin DOMAIN sceneState
                 [] OTHER -> TRUE
         txn.status = "ABORTED" => 
