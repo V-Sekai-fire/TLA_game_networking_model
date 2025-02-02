@@ -1,4 +1,7 @@
-<think>
+# Production-ready design for a leader-based event synchronization system in Godot that ensures linearizability
+
+\<think>
+
 Okay, let's tackle this. The user wants a production-ready design for a leader-based event synchronization system in Godot that ensures linearizability. Let me start by recalling what linearizability means—every operation appears to take effect atomically at some point between its invocation and response. So, all nodes must agree on the order of operations.
 
 First, the previous student-friendly explanation used a simple leader election and event logging. For production, I need to address scalability, fault tolerance, and strict consistency. Maybe I should look into Raft or Paxos for consensus, but the user mentioned avoiding the complexity of full consensus algorithms. However, since linearizability is crucial, some form of consensus is necessary.
@@ -22,7 +25,8 @@ Performance optimizations: Batching updates, using pipelining in Raft to reduce 
 Testing would involve simulating leader failures, network delays, and conflicting operations to ensure linearizability holds. Tools like Jepsen could be adapted for testing the system.
 
 Putting it all together, the production design would involve sharding the node tree into Raft groups, using HLCs for global ordering, parallel commits for cross-shard transactions, and integrating this with Godot's networking while ensuring security and fault tolerance.
-</think>
+
+\</think>
 
 ### **Production-Ready Leader-Based Event Sync for Godot with Linearizability**
 

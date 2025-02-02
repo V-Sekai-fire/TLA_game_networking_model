@@ -1,3 +1,5 @@
+# implement a leader-based event synchronization system for syncing Godot Engine node trees across multiple servers
+
 \<think>
 
 Okay, so I need to figure out how to implement a leader-based event synchronization system for syncing Godot Engine node trees across multiple servers, inspired by CockroachDB's parallel commits. Let me start by recalling what the user mentioned earlier. They want a system where each node in the tree is leased to a leader server, and updates are handled using parallel commits to avoid the overhead of two-phase commit (2PC). Also, they want to handle the grid problem, which I think refers to coordinating multiple leaders in a grid-like structure.
