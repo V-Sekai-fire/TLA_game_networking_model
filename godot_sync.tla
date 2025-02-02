@@ -34,7 +34,10 @@ SceneOp ==
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
       node: NodeID,     \* For remove_node/update_property: node to act on
-      properties: JSON ]
+-      properties: JSON ]
++      properties: JSON, \* For add_child/add_sibling: initial properties
++      key: STRING,     \* For update_property: key to update
++      value: STRING ]  \* For update_property: value to set
 
 TxnState ==
     [ txnId: Nat,
@@ -85,8 +88,10 @@ ApplySceneOp(op) ==
               ELSE
                   sceneState[X] ]
       [] op.type = "update_property" →
-          sceneState' = [sceneState EXCEPT
-                        ![op.node].properties = op.properties ]
+-          sceneState' = [sceneState EXCEPT
+-                        ![op.node].properties = op.properties ]
++          sceneState' = [sceneState EXCEPT
++                        ![op.node].properties[op.key] = op.value ]
 
 ApplyCommittedOps() ==
     WHILE appliedIndex[self] < commitIndex[self] DO
@@ -121,7 +126,11 @@ CheckConflicts(txn) ==
             ⇒ AbortTxn(other.txnId)
 
 Conflict(op1, op2) ==
-    ∨ (op1.node = op2.node ∧ op1.type ≠ "update_property")
+-    ∨ (op1.node = op2.node ∧ op1.type ≠ "update_property")
++    ∨ (op1.node = op2.node ∧ (
++           op1.type ≠ "update_property" ∨ op2.type ≠ "update_property" ∨ 
++           (op1.key = op2.key)
++       ))
     ∨ (op1.type = "remove_node" ∧ op2.node ∈ Descendants(op1.node))
     ∨ (op2.type = "remove_node" ∧ op1.node ∈ Descendants(op2.node))
 
