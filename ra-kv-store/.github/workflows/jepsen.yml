@@ -1,0 +1,35 @@
+name: Jepsen Tests for RA
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [ra_change]
+
+concurrency:
+  group: jepsen
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    container:
+      image: pivotalrabbitmq/jepsen
+    steps:
+      - uses: actions/checkout@v4
+      - name: Jepsen tests 
+        run: ci/jepsen-test.sh
+        env:
+          AWS_CONFIG: ${{ secrets.AWS_CONFIG }}
+          AWS_CREDENTIALS: ${{ secrets.AWS_CREDENTIALS }}
+      - name: Stop cluster
+        if: always()
+        working-directory: terraform-state
+        run: |
+          terraform init
+          terraform destroy -auto-approve
+          aws ec2 delete-key-pair --no-cli-pager --key-name jepsen-ra-kv-store-key
+      - name: Delete configuration
+        if: always()
+        run: |
+          rm -rf ~/.aws 
+          rm -rf terraform-state
+          rm -rf terraform.tfstate
