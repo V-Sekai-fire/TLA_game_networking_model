@@ -10,7 +10,7 @@
 
 - **Leverage pre-built TLA+ modules**:
   - [Raft (Ongardie)](https://github.com/ongardie/raft.tla) for consensus logic.
-  - [consento/hlc](https://github.com/consento-org/hlc) for hybrid clocks.
+  - [Pluscal/TLA+ modeling of Hybrid Logical Clocks and Hybrid Vector Clocks](https://github.com/muratdem/HLC) for hybrid clocks.
 
 #### **3. Prioritize Critical Properties**
 
