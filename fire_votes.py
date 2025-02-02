@@ -81,3 +81,8 @@ results = starvote.election(
 )
 
 print(json.dumps(results, indent=4))
+
+# % python3 fire_votes.py 
+# [
+#     "Leader-Based Event Synchronization"
+# ]
