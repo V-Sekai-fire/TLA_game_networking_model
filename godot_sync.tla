@@ -1,142 +1,178 @@
 ----------------------------- MODULE GodotSync -----------------------------
-EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft
-
-(*
-    Complete specification for Godot node tree synchronization using:
-    - Raft consensus (from raft.tla)
-    - Hybrid Logical Clocks (from hlc.tla)
-    - Parallel commits for low-latency scene updates
-*)
+EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, parallelcommits
 
 CONSTANTS
     GodotNodes,        \* Initial node tree structure
-    Shards,            \* {s1, s2} if using multi-shard
-    MaxLatency,        \* Maximum network delay (e.g., 16)
-    STOP, EPS          \* From HLC module
+    Shards,            \* {s1, s2} for multi-shard transactions
+    MaxLatency,        \* Maximum network delay (ticks)
+    NodeID,            \* 1..1000
+    SceneOperations    \* Set of valid scene operations
 
 VARIABLES
-    (* Inherited from raft.tla *)
+    (* Raft Consensus *)
     messages, elections, allLogs, currentTerm, state, votedFor, log, commitIndex,
     votesResponded, votesGranted, voterLog, nextIndex, matchIndex,
-
-    (* Inherited from hlc.tla *)
+    
+    (* Hybrid Logical Clocks *)
     pt, msg, l, c, pc,
+    
+    (* Godot Scene State *)
+    sceneState,         \* [node ↦ [parent, properties]]
+    pendingTxns,       \* [txnId ↦ [status, shards, hlc, ops]]
+    appliedIndex       \* Last applied log index per node
 
-    (* Godot-specific *)
-    sceneState,         \* Applied node tree
-    pendingTxns        \* Parallel commit transactions
-
-(*---------------------------- Type Definitions ----------------------------*)
-NodeID == 1..1000  \* Godot node identifiers
-JSON == [key ↦ STRING]  \* Simplified JSON representation
+(*--------------------------- Type Definitions ----------------------------*)
+HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
     [ type: {"add_node", "remove_node", "update_property"},
       node: NodeID,
-      parent: NodeID \union {NULL},
+      parent: NodeID ∪ {NULL},
       properties: JSON ]
 
-IntentStatus == {"PREPARED", "COMMITTED", "ABORTED"}
-TxnState == [ txnId: Nat, shards: SUBSET Shards, status: IntentStatus ]
+TxnState ==
+    [ txnId: Nat,
+      status: {"PREPARED", "COMMITTED", "ABORTED"},
+      shards: SUBSET Shards,
+      hlc: HLC,
+      ops: Seq(SceneOp) ]
 
-HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
+JSON == [key ↦ STRING]  \* Simplified JSON representation
 
-(*---------------------------- Raft Integration ----------------------------*)
-LogEntry == [term: Nat, cmd: SceneOp, hlc: HLC]
+(*-------------------------- Raft-HLC Integration --------------------------*)
+LogEntry == [term: Nat, cmd: SceneOp ∨ TxnState, hlc: HLC]
 
-RaftLeaderUpdate ==
-    LET entry == [term ↦ currentTerm[self], cmd ↦ NextSceneOp(), hlc ↦ HLC]
-    IN  ∧ LeaderAppendLog(entry)
-        ∧ SendToAll(entry)  \* Triggers HLC Send process
-        ∧ UNCHANGED <<pt, msg, l, c>>
-
-HandleAppendEntries(entries) ==
-    IF FollowerAcceptEntries(entries) THEN
-        ∧ UpdateFromHLC(entries[Len(entries)].hlc)
-        ∧ RecvFromLeader()  \* Triggers HLC Recv process
-    ELSE
-        RejectAppendEntries()
-
-(*---------------------------- HLC Integration ----------------------------*)
-UpdateFromHLC(receivedHLC) ==
-    ∧ msg' = [msg EXCEPT ![self] = receivedHLC]
-    ∧ Recv(self)  \* Use HLC's receive logic
+LeaderAppend(op) ==
+    LET entry == [term ↦ currentTerm[self], cmd ↦ op, hlc ↦ HLC]
+    IN  ∧ log' = [log EXCEPT ![self] = Append(log[self], entry)]
+        ∧ SendToAll(entry)
+        ∧ AdvanceHLC()
 
 SendToAll(entry) ==
-    ∧ WITH k ∈ Procs \ {self}
-        msg' = [msg EXCEPT ![k] = <<pt[self], l[self], c[self]>>]
-    ∧ Send(self)  \* Use HLC's send logic
+    ∀ follower ∈ Server \ {self}:
+        Send([mtype ↦ "AppendEntries",
+              term ↦ currentTerm[self],
+              entries ↦ <<entry>>,
+              commitIndex ↦ commitIndex[self],
+              hlc ↦ entry.hlc])
 
-(*---------------------------- Parallel Commits ----------------------------*)
-PrepareTransaction(txnId, shards, cmd) ==
-    ∧ txnId ∉ DOMAIN pendingTxns
-    ∧ pendingTxns' = pendingTxns ∪ [txnId ↦ [shards ↦ shards, status ↦ "PREPARED"]]
-    ∧ ∀ s ∈ shards: SendIntent(s, txnId, cmd)
-    ∧ Send(self)  \* HLC update on send
+HandleAppendEntries(i, entries) ==
+    IF FollowerAcceptEntries(entries) THEN
+        ∧ UpdateHLC(entries[Len(entries)].hlc)
+        ∧ AppendEntriesToLog(entries)
+        ∧ ApplyCommittedOps()
+    ELSE
+        RejectEntries()
 
-CommitTransaction(txnId) ==
-    LET txn ≜ pendingTxns[txnId]
+(*-------------------------- Parallel Commits ----------------------------*)
+PrepareTxn(txnId, ops) ==
+    LET shards = ChooseShards(ops)
+    IN  ∧ txnId ∉ DOMAIN pendingTxns
+        ∧ pendingTxns' = pendingTxns ∪ 
+            [txnId ↦ [status ↦ "PREPARED",
+                      shards ↦ shards,
+                      hlc ↦ HLC,
+                      ops ↦ ops]]
+        ∧ BroadcastIntent(shards, txnId, ops)
+        ∧ LeaderAppend([type ↦ "PREPARE", txnId ↦ txnId])
+
+CommitTxn(txnId) ==
+    LET txn = pendingTxns[txnId]
     IN  ∧ txn.status = "PREPARED"
         ∧ ∀ s ∈ txn.shards: ReceivedAck(s, txnId)
         ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
-        ∧ ApplySceneOp(txn.cmd)
-        ∧ Recv(self)  \* HLC update on receive
+        ∧ LeaderAppend([type ↦ "COMMIT", txnId ↦ txnId])
+        ∧ ApplyTxnOps(txn.ops)
 
-(*---------------------------- Godot Scene Tree ----------------------------*)
-ApplySceneOp(cmd) ==
-    CASE cmd.type = "add_node" →
-            sceneState' = AddNode(sceneState, cmd.node, cmd.parent, cmd.properties)
-      [] cmd.type = "remove_node" →
-            sceneState' = RemoveNode(sceneState, cmd.node)
-      [] cmd.type = "update_property" →
-            sceneState' = UpdateProperty(sceneState, cmd.node, cmd.properties)
+AbortTxn(txnId) ==
+    ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "ABORTED"]
+    ∧ LeaderAppend([type ↦ "ABORT", txnId ↦ txnId])
 
-AddNode(tree, node, parent, props) ==
-    tree ∪ [node ↦ [parent ↦ parent, properties ↦ props]]
+(*-------------------------- Scene Tree Operations -----------------------*)
+ApplySceneOp(op) ==
+    CASE op.type = "add_node" →
+            sceneState' = sceneState ∪ 
+                [op.node ↦ [parent ↦ op.parent, properties ↦ op.properties]]
+      [] op.type = "remove_node" →
+            sceneState' = [n ∈ DOMAIN sceneState ↦ 
+                IF n = op.node THEN UNDEFINED ELSE sceneState[n]]
+      [] op.type = "update_property" →
+            sceneState' = [n ∈ DOMAIN sceneState ↦ 
+                IF n = op.node 
+                THEN [sceneState[n] EXCEPT !.properties = op.properties] 
+                ELSE sceneState[n]]
 
-RemoveNode(tree, node) ==
-    [n ∈ DOMAIN tree ↦ IF n = node THEN UNDEFINED ELSE tree[n]]
+ApplyCommittedOps() ==
+    WHILE appliedIndex[self] < commitIndex[self] DO
+        LET entry = log[self][appliedIndex[self] + 1]
+        IN  CASE entry.cmd.type ∈ {"add_node", "remove_node", "update_property"} →
+                    ApplySceneOp(entry.cmd)
+              [] entry.cmd.type = "COMMIT" →
+                    ApplyTxnOps(pendingTxns[entry.cmd.txnId].ops)
+        appliedIndex' = [appliedIndex EXCEPT ![self] = appliedIndex[self] + 1]
 
-UpdateProperty(tree, node, props) ==
-    [n ∈ DOMAIN tree ↦ IF n = node 
-                        THEN [tree[n] EXCEPT !.properties = props]
-                        ELSE tree[n]]
+(*-------------------------- HLC Operations -------------------------------*)
+AdvanceHLC() ==
+    pt' = [pt EXCEPT ![self] = pt[self] + 1]
+    l' = [l EXCEPT ![self] = Max(l[self], pt[self] + 1)]
 
-(*---------------------------- Combined Transitions -------------------------*)
-Next ==
-    ∨ RaftLeaderUpdate
-    ∨ PrepareTransaction
-    ∨ CommitTransaction
-    ∨ HandleAppendEntries
-    ∨ LeaderCrash
-    ∨ NetworkPartition
-    ∨ (\E self ∈ Procs: j(self))  \* HLC processes
-    ∨ \E m ∈ DOMAIN messages : Receive(m)  \* Raft message handling
-    ∨ \E i ∈ Server : BecomeLeader(i)  \* Raft leadership
-    ∨ \E i ∈ Server : AdvanceCommitIndex(i)  \* Raft commit
+UpdateHLC(receivedHLC) ==
+    l' = [l EXCEPT ![self] = Max(l[self], receivedHLC[2])]
+    c' = [c EXCEPT ![self] = Max(c[self], receivedHLC[3]) + 1]
 
-(*---------------------------- Combined Invariants --------------------------*)
-CombinedInvariants ==
-    ∧ RaftInvariant
-    ∧ TypeOK              \* From HLC
-    ∧ Sync                 \* From HLC
-    ∧ Boundedl             \* From HLC
-    ∧ Boundedc             \* From HLC
-    ∧ NoOrphanNodes
-    ∧ CausalOrdering
+(*-------------------------- Combined Transitions -------------------------*)
+Next == 
+    ∨ ∃ self ∈ Server: 
+        ∨ LeaderAppend(NextSceneOp())
+        ∨ PrepareTxn(NewTxnId(), GetPendingOps())
+        ∨ CommitTxn(ChooseCommittableTxn())
+        ∨ AbortTxn(ChooseAbortableTxn())
+        ∨ HandleAppendEntries(self, messages[self])
+        ∨ HandleTimeout()
+        ∨ ProcessHLC()
+    
+    ∨ ∃ m ∈ DOMAIN messages: 
+        ∨ DeliverMessage(m)
+        ∨ DropMessage(m)
+    
+    ∨ ∃ self ∈ Server:
+        ∨ CrashNode(self)
+        ∨ RecoverNode(self)
+
+(*-------------------------- Safety Invariants ----------------------------*)
+CausalConsistency ==
+    ∀ n1, n2 ∈ Server:
+        ∀ i ∈ 1..Len(log[n1]):
+            ∀ j ∈ 1..Len(log[n2]):
+                log[n1][i].hlc < log[n2][j].hlc ⇒ 
+                    ¬∃ op1 ∈ log[n1][i].cmd, op2 ∈ log[n2][j].cmd : 
+                        Conflict(op1, op2)
 
 NoOrphanNodes ==
     ∀ node ∈ DOMAIN sceneState:
         sceneState[node].parent ≠ NULL ⇒ sceneState[node].parent ∈ DOMAIN sceneState
 
-CausalOrdering ==
-    ∀ e1, e2 ∈ log:
-        e1.hlc < e2.hlc ⇒ ¬(e2.cmd \dependsOn e1.cmd)
+TransactionAtomicity ==
+    ∀ txn ∈ pendingTxns:
+        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : op ∈ sceneState
+        txn.status = "ABORTED" ⇒ ∀ op ∈ txn.ops : op ∉ sceneState
 
-(*---------------------------- Configuration --------------------------------*)
-ASSUME Cardinality(Server) = 3
-ASSUME Cardinality(Shards) = 1  \* Start with single-shard
-ASSUME MaxLatency ≤ 16
-ASSUME N = Cardinality(Server)  \* HLC process count
+(*-------------------------- Liveness Properties -------------------------*)
+EventualConsistency ==
+    ∀ op ∈ SceneOperations :
+        ◇(∃ txn ∈ pendingTxns : 
+            txn.status = "COMMITTED" ∧ op ∈ txn.ops)
+
+Progress ==
+    ∀ txn ∈ pendingTxns :
+        ◇(txn.status ∈ {"COMMITTED", "ABORTED"})
+
+(*-------------------------- Configuration ---------------------------------*)
+ASSUME 
+    ∧ Cardinality(Server) = 3
+    ∧ Cardinality(Shards) = 2
+    ∧ MaxLatency = 16
+    ∧ GodotNodes ≠ {}
+    ∧ NodeID ⊆ 1..1000
 
 =============================================================================
