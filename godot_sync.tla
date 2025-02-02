@@ -31,14 +31,14 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", 
-            "update_property", "reparent_subtree", 
+            "set_property", "get_property", "reparent_subtree", 
             "remove_property", "batch_update"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
       node: NodeID,     \* Node to act on
       properties: JSON, \* Initial properties for new nodes
       key: STRING,      \* For property operations
-      value: STRING,     \* For update_property
+      value: STRING,     \* For set_property
       new_parent: NodeID,  \* For reparent_subtree
       new_sibling: NodeID, \* For reparent_subtree
       updates: Seq([node: NodeID, key: STRING, value: STRING]) ]  \* For batch_update
@@ -99,9 +99,12 @@ ApplySceneOp(op) ==
                   [sceneState[X] EXCEPT !.right_sibling = sceneState[M].right_sibling]
               ELSE
                   sceneState[X] ]
-    [] op.type = "update_property" →
+    [] op.type = "set_property" →
         sceneState' = [sceneState EXCEPT
                       ![op.node].properties[op.key] = op.value ]
+    [] op.type = "get_property" →
+        \* Read operation preserves state
+        UNCHANGED sceneState
     [] op.type = "reparent_subtree" →
         LET originalParent == CHOOSE p ∈ DOMAIN sceneState : 
                                 sceneState[p].left_child = op.node ∨ 
@@ -159,9 +162,11 @@ CheckConflicts(txn) ==
 
 Conflict(op1, op2) ==
     ∨ (op1.node = op2.node ∧ (
-           (op1.type ≠ "update_property" ∧ op1.type ≠ "remove_property") ∨ 
-           (op2.type ≠ "update_property" ∧ op2.type ≠ "remove_property") ∨ 
-           (op1.key = op2.key)
+           (op1.type ∉ {"set_property", "remove_property", "get_property"} ∨ 
+            op2.type ∉ {"set_property", "remove_property", "get_property"}) 
+           ∨ (op1.key = op2.key ∧ 
+              (op1.type ∈ {"set_property", "remove_property"} ∨ 
+               op2.type ∈ {"set_property", "remove_property"}))
        ))
     ∨ (op1.type ∈ {"reparent_subtree", "remove_node"} ∧ 
        op2.node ∈ Descendants(op1.node))
@@ -190,7 +195,8 @@ NoOrphanNodes ==
 
 TransactionAtomicity ==
     ∀ txn ∈ pendingTxns:
-        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : op ∈ DOMAIN sceneState
+        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : 
+            op.type ≠ "get_property" ⇒ op ∈ DOMAIN sceneState
         txn.status = "ABORTED" ⇒ ∀ op ∈ txn.ops : op ∉ DOMAIN sceneState
 
 NoDanglingIntents ==
@@ -214,7 +220,7 @@ PropertyTombstoneConsistency ==
             ∃! e ∈ log : 
                 e.cmd.node = n ∧ 
                 e.cmd.key = k ∧ 
-                (e.cmd.type = "update_property" ∨ e.cmd.type = "remove_property")
+                (e.cmd.type = "set_property" ∨ e.cmd.type = "remove_property")
 
 (*-------------------------- Configuration ---------------------------------*)
 ASSUME 
