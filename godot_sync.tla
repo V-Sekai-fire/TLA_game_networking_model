@@ -31,12 +31,15 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", 
-            "set_property", "reparent_subtree", 
-            "remove_property", "batch_update", "create_root",
-            "remove_subtree", "batch_structure"},
+            "set_property", "reparent_subtree", "remove_property", 
+            "batch_update", "create_root", "remove_subtree", "batch_structure",
+            "move_child"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
       node: NodeID,     \* Node to act on
+      parent: NodeID,   \* For move_child: parent node
+      child_node: NodeID, \* For move_child: node to move
+      to_index: Int,    \* For move_child: target position
       properties: JSON, \* Initial properties for new nodes
       key: STRING,      \* For property operations
       value: STRING,     \* For set_property
@@ -75,6 +78,22 @@ ApplySceneOp(op) ==
     LET Descendants(n) == 
         LET Children == { sceneState[n].left_child } ∪ { m ∈ DOMAIN sceneState : ∃ k ∈ DOMAIN sceneState : m = sceneState[k].right_sibling }
         IN  IF Children = {} THEN {n} ELSE {n} ∪ UNION { Descendants(c) : c ∈ Children } 
+    LET OrderedChildren(p) ==
+        LET Rec(n) == IF n = NULL THEN << >> 
+                      ELSE Append(Rec(sceneState[n].right_sibling), n)
+        IN Reverse(Rec(sceneState[p].left_child))
+    LET RebuildSiblingLinks(p, children) ==
+        IF children = << >> 
+        THEN [sceneState EXCEPT ![p].left_child = NULL]
+        ELSE LET first == Head(children)
+                  rest == Tail(children)
+             IN  LET UpdateSiblings(s, i) ==
+                      IF i > Len(rest) THEN s
+                      ELSE [s EXCEPT ![children[i]].right_sibling = 
+                            IF i = Len(rest) THEN NULL ELSE children[i+1]]
+             IN  [sceneState EXCEPT 
+                  ![p].left_child = first,
+                  Iterate(i ∈ 1..Len(rest): UpdateSiblings(@, i))]
     IN
     CASE op.type = "add_child" →
         LET target == op.target IN
@@ -147,6 +166,19 @@ ApplySceneOp(op) ==
     [] op.type = "create_root" →  \* Root creation
         LET new == op.new_node IN
         sceneState' = [sceneState EXCEPT ![new] = [left_child ↦ NULL, right_sibling ↦ NULL, properties ↦ op.properties]]
+    [] op.type = "move_child" →
+        LET p == op.parent
+            c == op.child_node
+            current == OrderedChildren(p)
+            adj_idx == IF op.to_index < 0 THEN Len(current) + op.to_index ELSE op.to_index
+        IN
+        IF c ∉ current ∨ adj_idx < 0 ∨ adj_idx >= Len(current)
+        THEN UNCHANGED sceneState
+        ELSE
+            LET filtered == [x ∈ current : x ≠ c]
+                new_order == SubSeq(filtered, 1, adj_idx) ◦ <<c>> ◦ SubSeq(filtered, adj_idx+1, Len(filtered))
+            IN
+            sceneState' = RebuildSiblingLinks(p, new_order)
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
@@ -190,9 +222,13 @@ Conflict(op1, op2) ==
     ∨ (op1.type = "create_root" ∧ op2.type = "create_root" ∧ op1.new_node = op2.new_node)
     ∨ (IsTreeMod(op1) ∧ (op2.node ∈ Descendants(op1.node) ∨ op1.node ∈ Descendants(op2.node)))
     ∨ (IsTreeMod(op2) ∧ (op1.node ∈ Descendants(op2.node) ∨ op2.node ∈ Descendants(op1.node)))
+    ∨ (op1.type = "move_child" ∧ op2.type = "move_child" 
+       ∧ op1.parent = op2.parent ∧ op1.child_node = op2.child_node)
+    ∨ (op1.type = "move_child" ∧ op2.type ∈ {"add_child", "add_sibling"} 
+       ∧ op1.parent = op2.target)
 
 IsWrite(op) == op.type ∈ {"set_property", "remove_property"}
-IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree", "create_root"}
+IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree", "create_root", "move_child"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
@@ -251,6 +287,12 @@ PropertyTombstoneConsistency ==
                 e.cmd.node = n ∧ 
                 e.cmd.key = k ∧ 
                 (e.cmd.type = "set_property" ∨ e.cmd.type = "remove_property")
+
+SiblingOrderConsistency ==
+    ∀ p ∈ DOMAIN sceneState:
+        LET children == OrderedChildren(p) IN
+        ∀ i ∈ 1..Len(children)-1:
+            sceneState[children[i]].right_sibling = children[i+1]
 
 (*-------------------------- Configuration ---------------------------------*)
 ASSUME 
