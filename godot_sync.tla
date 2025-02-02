@@ -1,36 +1,30 @@
 ----------------------------- MODULE GodotSync -----------------------------
-EXTENDS Integers, Sequences, TLC, FiniteSets, hlc
+EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft
 
 (*
-    Combined specification integrating:
-    - Raft-based Godot node synchronization
-    - CockroachDB-style parallel commits
-    - External HLC implementation
+    Complete specification for Godot node tree synchronization using:
+    - Raft consensus (from raft.tla)
+    - Hybrid Logical Clocks (from hlc.tla)
+    - Parallel commits for low-latency scene updates
 *)
 
 CONSTANTS
-    Nodes,              \* {n1, n2, n3}
-    NodeTree,           \* Initial Godot scene tree
-    Shards,             \* {s1, s2} if using multi-shard
-    MaxLatency,         \* Maximum network delay (e.g., 16)
-    STOP, EPS           \* From HLC module
+    GodotNodes,        \* Initial node tree structure
+    Shards,            \* {s1, s2} if using multi-shard
+    MaxLatency,        \* Maximum network delay (e.g., 16)
+    STOP, EPS          \* From HLC module
 
 VARIABLES
-    (* Raft State *)
-    currentTerm,        \* Latest term server has seen
-    votedFor,          \* CandidateId that received vote in current term
-    log,                \* Log entries (containing Godot operations)
-    commitIndex,        \* Highest log entry known to be committed
-    
-    (* HLC State (from external module) *)
-    pt,                 \* Physical time
-    msg,                \* Message clocks
-    l, c,               \* HLC components
-    pc,                 \* Process counters
-    
-    (* Parallel Commits *)
-    pendingTxns,        \* {txnId: [shards: SUBSET Shards, status: IntentStatus]}
-    sceneState          \* Applied Godot node tree state
+    (* Inherited from raft.tla *)
+    messages, elections, allLogs, currentTerm, state, votedFor, log, commitIndex,
+    votesResponded, votesGranted, voterLog, nextIndex, matchIndex,
+
+    (* Inherited from hlc.tla *)
+    pt, msg, l, c, pc,
+
+    (* Godot-specific *)
+    sceneState,         \* Applied node tree
+    pendingTxns        \* Parallel commit transactions
 
 (*---------------------------- Type Definitions ----------------------------*)
 NodeID == 1..1000  \* Godot node identifiers
@@ -51,7 +45,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 LogEntry == [term: Nat, cmd: SceneOp, hlc: HLC]
 
 RaftLeaderUpdate ==
-    LET entry == [term ↦ currentTerm, cmd ↦ NextSceneOp(), hlc ↦ HLC]
+    LET entry == [term ↦ currentTerm[self], cmd ↦ NextSceneOp(), hlc ↦ HLC]
     IN  ∧ LeaderAppendLog(entry)
         ∧ SendToAll(entry)  \* Triggers HLC Send process
         ∧ UNCHANGED <<pt, msg, l, c>>
@@ -97,7 +91,18 @@ ApplySceneOp(cmd) ==
       [] cmd.type = "update_property" →
             sceneState' = UpdateProperty(sceneState, cmd.node, cmd.properties)
 
-(*---------------------------- State Transitions ---------------------------*)
+AddNode(tree, node, parent, props) ==
+    tree ∪ [node ↦ [parent ↦ parent, properties ↦ props]]
+
+RemoveNode(tree, node) ==
+    [n ∈ DOMAIN tree ↦ IF n = node THEN UNDEFINED ELSE tree[n]]
+
+UpdateProperty(tree, node, props) ==
+    [n ∈ DOMAIN tree ↦ IF n = node 
+                        THEN [tree[n] EXCEPT !.properties = props]
+                        ELSE tree[n]]
+
+(*---------------------------- Combined Transitions -------------------------*)
 Next ==
     ∨ RaftLeaderUpdate
     ∨ PrepareTransaction
@@ -106,6 +111,9 @@ Next ==
     ∨ LeaderCrash
     ∨ NetworkPartition
     ∨ (\E self ∈ Procs: j(self))  \* HLC processes
+    ∨ \E m ∈ DOMAIN messages : Receive(m)  \* Raft message handling
+    ∨ \E i ∈ Server : BecomeLeader(i)  \* Raft leadership
+    ∨ \E i ∈ Server : AdvanceCommitIndex(i)  \* Raft commit
 
 (*---------------------------- Combined Invariants --------------------------*)
 CombinedInvariants ==
@@ -117,9 +125,18 @@ CombinedInvariants ==
     ∧ NoOrphanNodes
     ∧ CausalOrdering
 
-(*---------------------------- Configuration ---------------------------------*)
-ASSUME Cardinality(Nodes) = 3
+NoOrphanNodes ==
+    ∀ node ∈ DOMAIN sceneState:
+        sceneState[node].parent ≠ NULL ⇒ sceneState[node].parent ∈ DOMAIN sceneState
+
+CausalOrdering ==
+    ∀ e1, e2 ∈ log:
+        e1.hlc < e2.hlc ⇒ ¬(e2.cmd \dependsOn e1.cmd)
+
+(*---------------------------- Configuration --------------------------------*)
+ASSUME Cardinality(Server) = 3
+ASSUME Cardinality(Shards) = 1  \* Start with single-shard
 ASSUME MaxLatency ≤ 16
-ASSUME N = Cardinality(Nodes)  \* HLC process count
+ASSUME N = Cardinality(Server)  \* HLC process count
 
 =============================================================================
