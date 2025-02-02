@@ -36,8 +36,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", "move_shard",
             "set_property", "move_subtree", "remove_property", 
-            "batch_update", "create_root", "batch_structure",
-            "move_child"},
+            "batch_update", "batch_structure", "move_child"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
       node: NodeID,     \* Node to act on
@@ -105,11 +104,19 @@ ApplySceneOp(op) ==
     CASE op.type = "add_child" ->
         LET target == op.target IN
         LET new == op.new_node IN
-        sceneState' = [sceneState EXCEPT
-                      ![target].left_child = new,
-                      ![new] = [ left_child |-> NULL,
-                                right_sibling |-> sceneState[target].left_child,
-                                properties |-> op.properties ]]
+        IF target = NULL THEN
+            \* Handle root creation
+            sceneState' = [sceneState EXCEPT
+                          ![new] = [ left_child |-> NULL,
+                                    right_sibling |-> NULL,
+                                    properties |-> op.properties ]]
+        ELSE
+            \* Existing add_child logic for non-NULL parent
+            sceneState' = [sceneState EXCEPT
+                          ![target].left_child = new,
+                          ![new] = [ left_child |-> NULL,
+                                    right_sibling |-> sceneState[target].left_child,
+                                    properties |-> op.properties ]]
   [] op.type = "add_sibling" ->
         LET target == op.target IN
         LET new == op.new_node IN
@@ -157,9 +164,6 @@ ApplySceneOp(op) ==
             IF op.type \in DOMAIN SceneOperations THEN ApplySceneOp(op) ELSE state
         IN
         sceneState' = FoldLeft(ApplyOp, sceneState, op.structure_ops)
-  [] op.type = "create_root" ->  \* Root creation
-        LET new == op.new_node IN
-        sceneState' = [sceneState EXCEPT ![new] = [left_child |-> NULL, right_sibling |-> NULL, properties |-> op.properties]]
   [] op.type = "move_child" ->
         LET p == op.parent
             c == op.child_node
@@ -195,9 +199,9 @@ ApplySceneOp(op) ==
             LET attach_op = [type: "attach_child", node: op.new_parent, 
                             child: op.node, position: op.position]
             IN LeaderAppend(op.new_shard, attach_op)
-        \* Preserve structure if no new parent (make root)
+        \* Preserve structure if no new parent (use add_child with NULL target)
         /\ IF op.new_parent = NULL THEN
-            LeaderAppend(op.new_shard, [type: "create_root", new_node: op.node])
+            LeaderAppend(op.new_shard, [type: "add_child", target: NULL, new_node: op.node, properties: sceneState[op.node].properties])
         \* Cleanup old shard references
         /\ \A s \in old_shards :
             LeaderAppend(s, [type: "shard_remove", node: op.node])
@@ -258,7 +262,6 @@ CheckConflicts(txn) ==
 Conflict(op1, op2) ==
     \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
        /\ (op1.key = op2.key \/ op1.type \notin {"set_property", "remove_property"}))
-    \/ (op1.type = "create_root" /\ op2.type = "create_root" /\ op1.new_node = op2.new_node)
     \/ (IsTreeMod(op1) /\ (op2.node \in Descendants(op1.node) \/ op1.node \in Descendants(op2.node)))
     \/ (IsTreeMod(op2) /\ (op1.node \in Descendants(op2.node) \/ op2.node \in Descendants(op1.node)))
     \/ (op1.type = "move_child" /\ op2.type = "move_child" 
@@ -267,7 +270,7 @@ Conflict(op1, op2) ==
        /\ op1.parent = op2.target)
 
 IsWrite(op) == op.type \in {"set_property", "remove_property"}
-IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "create_root", "move_child"}
+IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
@@ -293,14 +296,14 @@ TransactionAtomicity ==
     \A txn \in pendingTxns:
         txn.status = "COMMITTED" => 
             \A op \in txn.ops:
-                CASE op.type \in {"add_child", "add_sibling", "create_root"} ->
+                CASE op.type \in {"add_child", "add_sibling"} ->
                     op.new_node \in DOMAIN sceneState
                 [] op.type = "remove_node" ->
                     op.node \notin DOMAIN sceneState
                 [] OTHER -> TRUE
         txn.status = "ABORTED" => 
             \A op \in txn.ops:
-                CASE op.type \in {"add_child", "add_sibling", "create_root"} ->
+                CASE op.type \in {"add_child", "add_sibling"} ->
                     op.new_node \notin DOMAIN sceneState
                 [] OTHER -> TRUE
 
