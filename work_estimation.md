@@ -1,185 +1,84 @@
 <think>
-Okay, so I need to estimate all the work needed to simulate the entire system described in the technical report using the Raft TLA+ spec and the parallel commits TLA+ spec. Let me start by understanding what the system does and what components are involved.
+Okay, the user wants to repeat the final plan for making the simulation cheaper. Let me recall the previous interaction. The user had a detailed technical report and wanted to estimate the work needed to simulate the system with Raft and Parallel Commits TLA+ specs. Then they asked how to make it cheaper, and I provided a strategy focusing on simplifying the model, reusing specs, prioritizing properties, optimizing TLC, and incremental verification. The final plan outlined a 66% cost reduction by cutting effort from 19 to 6.5 days.
 
-The system is a leader-based synchronization mechanism for distributed Godot Engine VR systems. The goal is to achieve low latency (sub-16.5ms) by using optimized Raft consensus and parallel commits. The report mentions components like clients, leaders, followers, networking with QUIC/HTTP3, bulk node operations, Hybrid Logical Clocks (HLC), and formal verification with TLA+.
-
-First, I need to figure out what parts of the system need to be simulated. The main components are the Raft consensus algorithm and the parallel commit protocol. The TLA+ specs for both are already available, so the task is to simulate the entire system using these specs. But how do these two specs interact? The parallel commits are part of the Raft-based system, so maybe the parallel commit protocol is integrated into the Raft implementation.
-
-The report mentions that they did TLA+ verification for properties like bounded state machine apply time, pipelined Raft, and HLC causal order. The verification results show that the system meets certain latency and consistency guarantees under failures. So simulating the entire system would involve combining the Raft and parallel commit models and checking the properties mentioned in the report.
-
-Let me break down the steps needed to simulate the system:
-
-1. **Understanding the Existing TLA+ Specs**: First, I need to review the Raft TLA+ spec and the parallel commits TLA+ spec provided. What do they cover? The Raft spec probably models the leader election, log replication, and commit process. The parallel commit spec might handle the part where transactions are committed in parallel across shards or nodes, reducing latency.
-
-2. **Integrating the Specs**: The system uses a pipelined Raft with parallel commits. So the parallel commit protocol needs to be integrated into the Raft model. This could involve modifying the Raft spec to include the parallel commit steps, such as intent writes, quorum ACKs, and asynchronous commits.
-
-3. **Modeling Hybrid Logical Clocks (HLC)**: The HLC is used for causal ordering. The TLA+ model needs to include HLCs to ensure that events are ordered correctly. This would involve adding HLC variables to the state and defining how they are updated with each event. The verification should check that causal consistency is maintained.
-
-4. **Defining Latency Constraints**: The report specifies various latency targets for each component (e.g., leader processing time of 3ms). The TLA+ model needs to incorporate timing aspects to verify that these latency bounds are not exceeded. This might involve using real-time TLA+ or modeling time as discrete steps with constraints.
-
-5. **Modeling Failures and Recovery**: The system must handle leader failover, network partitions, etc. The TLA+ model should include these failure scenarios and verify that the system can recover within specified time bounds (e.g., leader failover time of 8ms worst-case).
-
-6. **Verifying System Properties**: Key properties to verify include end-to-end latency, consistency (linearizability and causal), and fault tolerance. The model checking needs to ensure that under all possible scenarios, the system meets the latency targets and correctness properties.
-
-7. **Setting Up the Model Checker**: TLA+ specs are checked with tools like TLC. Configuring TLC to handle the combined model, especially with timing aspects, might require setting appropriate model parameters, state constraints, and liveness properties.
-
-8. **Handling Concurrency and Parallelism**: The parallel commit protocol allows multiple transactions to be processed concurrently. The TLA+ model must capture this concurrency and ensure that there are no race conditions or violations of consistency.
-
-9. **Testing Edge Cases**: For example, what happens if a leader fails after sending intent writes but before receiving ACKs? The model should cover such scenarios and verify that the system handles them correctly, possibly by reissuing requests or electing a new leader.
-
-10. **Validating Performance Claims**: While TLA+ is good for correctness, performance claims (like latency) might need to be modeled through abstract timing constraints. For instance, ensuring that each step in the protocol doesn't exceed its allocated time budget.
-
-Potential challenges I might encounter:
-
-- **Time Modeling in TLA+**: TLA+ isn't inherently real-time, so modeling precise latency constraints might require abstracting time into discrete steps or using a model where each action consumes a certain amount of time units. This could complicate the model but is necessary to verify latency bounds.
-
-- **Combining Two Specs**: Integrating the parallel commit protocol into the Raft model might require significant changes to both specs, ensuring that the combined model correctly represents the interaction between Raft's log replication and the parallel commit steps.
-
-- **State Space Explosion**: The combination of Raft, parallel commits, HLC, and failure scenarios could lead to a large state space. Configuring TLC with appropriate symmetry and constraints to manage this would be crucial.
-
-- **Causal Consistency with HLC**: Ensuring that the HLC model in TLA+ correctly enforces causal order might involve tracking the HLC timestamps of each transaction and verifying that all dependencies are respected.
-
-Steps to address these challenges:
-
-1. **Modular Approach**: Start by extending the Raft TLA+ spec with the parallel commit steps. For instance, after a leader appends an entry to its log, it initiates the parallel commit process by sending intents to followers and waiting for quorum ACKs. Then, model the commit phase asynchronously.
-
-2. **Time Variables**: Introduce variables to track the time taken at each step. For example, each Raft append entry action could have a timestamp, and the model enforces that the time taken for processing doesn't exceed the specified latency budgets (e.g., leader processing time <= 3ms).
-
-3. **HLC Integration**: Add HLC variables to each node. Each event (like receiving a transaction) increments the HLC based on the current physical time and logical clock. The model must ensure that if event e1 causally precedes e2, then e1's HLC is less than e2's.
-
-4. **Failure Scenarios as Model Actions**: Define actions for leader failure, network partitions, and follower unavailability. These actions would change the system state (e.g., electing a new leader) and the model should check that the system recovers within the allowed time.
-
-5. **Invariants and Temporal Properties**: Define invariants such as "no transaction commit exceeds 16.5ms end-to-end" and temporal properties like "eventually all transactions are committed". Use TLC to check these.
-
-6. **Optimizations for State Space**: Use symmetry reduction (if nodes are symmetric), limit the number of nodes or transactions in the model, and set bounds on message delays and processing times to keep the state space manageable.
-
-7. **Validation Against Use Cases**: Test the model against the specific workload mentioned in the report (concurrent 500-node tree updates) by abstracting it into a manageable number of transactions in the model, ensuring that the system behaves as expected under high load.
-
-Documentation and iteration would also be part of the process. After each modification to the TLA+ specs, run the model checker to verify that existing properties still hold and new ones are enforced. This iterative process helps catch integration issues early.
-
-In summary, the work involves integrating the two TLA+ specs, adding timing and HLC components, defining failure modes, and configuring the model checker to verify both correctness and latency properties under various scenarios. This requires a deep understanding of both the system design and TLA+ modeling techniques.
+Now, the user is asking to "repeat the final plan." They probably want a concise summary of the optimized approach without going through the entire thought process again. I should present the key steps clearly, maybe in bullet points or sections, highlighting the main strategies and the resulting cost savings. Need to ensure it's easy to follow and captures all the critical points from the previous answer. Also, check if there's any additional context or if the user needs further clarification, but since they just want the plan repeated, stick to the structured summary.
 </think>
 
-To simulate the entire system combining the Raft TLA+ specification and the Parallel Commits TLA+ specification, the following work is required:
-
 ---
 
-### **1. Integration of Raft and Parallel Commit Models**
+### **Optimized Final Plan: Low-Cost Simulation of Raft + Parallel Commits System**
 
-- **Objective**: Combine the two specs to reflect the pipelined Raft protocol with parallel commits.
-- **Steps**:
-  1. **Extend Raft’s Log Append Mechanism**:
-     - Modify the Raft leader’s log append action to trigger parallel commit intent writes to followers.
-  2. **Add Parallel Commit Protocol**:
-     - Introduce `IntentWrite`, `QuorumAck`, and `AsyncCommit` actions into the Raft workflow.
-  3. **Define State Transitions**:
-     - Ensure parallel commit phases (intent, ACK, commit) align with Raft’s log replication states.
+#### **1. Simplify the Model**
 
----
+- **3-node cluster** (1 leader, 2 followers) instead of 5 nodes.
+- **Abstract networking** (ignore QUIC/HTTP3 details, use async channels).
+- **Discrete time steps** (3ms increments instead of 1ms).
 
-### **2. Hybrid Logical Clock (HLC) Modeling**
+#### **2. Reuse Existing Specs**
 
-- **Objective**: Enforce causal consistency using HLCs in TLA+.
-- **Steps**:
-  1. **Add HLC Variables**:
-     - Track `hlc_physical` (NTP-synced) and `hlc_logical` for each transaction.
-  2. **Update Rules**:
-     - On conflict, increment `hlc_logical`; synchronize with physical time on new inputs.
-  3. **Causal Order Invariant**:
-     - Verify `∀ t1, t2 ∈ Transactions: t1 → t2 ⇒ t1.hlc < t2.hlc`.
+- **Leverage pre-built TLA+ modules**:
+  - [Raft (Ongardie)](https://github.com/ongardie/raft.tla) for consensus logic.
+  - [AWS HLC](https://github.com/aws/tla-plus) for hybrid clocks.
 
----
+#### **3. Prioritize Critical Properties**
 
-### **3. Real-Time Latency Constraints**
+- **Verify safety only**: Linearizability and HLC causal order.
+- **Test only critical failures**: Leader crash and 1-network partition.
 
-- **Objective**: Model end-to-end latency guarantees (sub-16.5ms).
-- **Steps**:
-  1. **Timed Actions**:
-     - Annotate actions with latency bounds (e.g., `LeaderProcessingTime ≤ 3ms`).
-  2. **Global Clock Variable**:
-     - Track cumulative latency for each transaction from input to commit.
-  3. **Invariants**:
-     - `EndToEndLatency ≤ 16.5ms`.
+#### **4. Optimize TLC Configuration**
 
----
+- **Symmetry reduction**: Treat followers as interchangeable.
+- **Limit transactions**: 3 concurrent ops instead of 500.
+- **Constrain latency**: `ASSUME latency ≤ 16`.
 
-### **4. Failure Scenario Modeling**
+#### **5. Incremental Verification**
 
-- **Objective**: Verify system behavior under failures.
-- **Steps**:
-  1. **Leader Failover**:
-     - Model leader crashes and ensure standby leaders resume processing within `8ms`.
-  2. **Network Partitions**:
-     - Simulate partial connectivity loss and validate recovery within `12ms`.
-  3. **Temporal Properties**:
-     - Check liveness: `◇(AllTransactionsCommitted)`.
-
----
-
-### **5. TLC Model Configuration**
-
-- **Objective**: Manage state space explosion while verifying key properties.
-- **Steps**:
-  1. **Symmetry Reduction**:
-     - Treat followers as symmetric to reduce permutations.
-  2. **Bounds**:
-     - Limit to 3 nodes (2 followers + 1 leader) and 5 concurrent transactions.
-  3. **Constraint Tuning**:
-     - Restrict message delays to `[1ms, 4ms]` based on QUIC/HTTP3 performance.
-
----
-
-### **6. Verification of Key Properties**
-
-- **Objective**: Validate correctness and performance claims.
-- **Properties to Check**:
-  1. **Safety**:
-     - Linearizable consistency for committed transactions.
-  2. **Liveness**:
-     - All client requests eventually commit.
-  3. **Latency**:
-     - No transaction exceeds `16.5ms` end-to-end.
-  4. **Fault Tolerance**:
-     - Leader failover completes within `8ms`.
-
----
-
-### **7. Validation Against Experimental Setup**
-
-- **Objective**: Align the model with the report’s experimental conditions.
-- **Steps**:
-  1. **Parameterize Node Counts**:
-     - Model a 5-node cluster (1 leader, 4 followers).
-  2. **Workload Injection**:
-     - Simulate 100 concurrent client requests with batched node updates.
-  3. **Metrics Collection**:
-     - Track P99 latency, commit success rate, and failover times.
-
----
-
-### **Estimated Effort**
-
-| **Task**                         | **Effort (Person-Days)** |
-| -------------------------------- | ------------------------ |
-| Model Integration                | 3                        |
-| HLC Implementation               | 2                        |
-| Real-Time Constraints            | 2                        |
-| Failure Scenario Modeling        | 3                        |
-| TLC Configuration & Optimization | 4                        |
-| Validation & Debugging           | 5                        |
-| **Total**                        | **19**                   |
+1. **Phase 1**: Verify Raft alone with latency bounds.
+2. **Phase 2**: Add parallel commits and check conflicts.
+3. **Phase 3**: Integrate HLC causal ordering.
 
 ---
 
 ### **Deliverables**
 
-1. **Integrated TLA+ Model**:
-   - Combines Raft, parallel commits, HLC, and latency constraints.
-2. **TLC Configuration Files**:
-   - Bounded model-checking settings for key scenarios.
-3. **Verification Report**:
-   - Summary of safety/liveness proofs and latency guarantees.
+1. **Minimal Integrated Model**:
+
+   ```tla
+   EXTENDS Raft, Integers
+   VARIABLES committed, hlc, latency
+
+   ParallelCommit ==
+     ∧ LeaderAppendLog
+     ∧ ∀ n ∈ Followers : SendIntent(n)
+     ∧ WaitForQuorum(2/3)
+     ∧ UpdateHLC()
+     ∧ latency' = latency + 3 \* ms
+
+   ASSUME MaxLatency == latency ≤ 16
+   ```
+
+2. **TLC Configuration**:
+   ```bash
+   tlc -workers 8 -depth 100 -config clusters=3 Model.tla
+   ```
 
 ---
 
-This plan ensures the system’s design is rigorously verified against both functional and performance requirements.
+### **Effort & Savings**
+
+| **Task**           | **Original** | **Optimized** | **Savings** |
+| ------------------ | ------------ | ------------- | ----------- |
+| Model Integration  | 3 days       | 1 day         | 66%         |
+| HLC Implementation | 2 days       | 0.5 days      | 75%         |
+| Failure Scenarios  | 3 days       | 1 day         | 66%         |
+| **Total**          | **19 days**  | **6.5 days**  | **66%**     |
+
+---
+
+### **Key Tradeoffs**
+
+- **Less Realism**: No QUIC retransmission logic or large-scale workloads.
+- **Partial Liveness**: Focus on safety; deadlines are approximate.
+- **Scalability**: 3-node model extrapolates to larger clusters theoretically.
+
+Execute this plan to achieve **70% of verification rigor for 30% of the cost**.
