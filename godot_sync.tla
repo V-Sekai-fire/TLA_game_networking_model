@@ -9,12 +9,14 @@ CONSTANTS
     SceneOperations    \* Set of valid scene operations
 
 VARIABLES
-    (* Raft Consensus *)
-    messages, elections, allLogs, currentTerm, state, votedFor, log, commitIndex,
-    votesResponded, votesGranted, voterLog, nextIndex, matchIndex,
+    (* Multi-Raft Consensus *)
+    shardLogs,        \* [ShardID ↦ Seq(LogEntry)]
+    shardTerms,       \* [ShardID ↦ Nat]
+    shardCommitIndex, \* [ShardID ↦ Nat]
+    shardLeaders,     \* [ShardID ↦ NodeID]
     
     (* Hybrid Logical Clocks *)
-    pt, msg, l, c, pc,
+    pt, l, c, pc,
     
     (* Godot Scene State *)
     sceneState,         \* [node ↦ [left_child, right_sibling, properties]]
@@ -22,15 +24,16 @@ VARIABLES
     appliedIndex,      \* Last applied log index per node
     
     (* Coordination *)
-    intents,           \* [txnId ↦ [shard ↦ {"PENDING", "ACK"}]] 
-    shardMap,         \* [node ↦ shard]
+    preparedHLCs,     \* [ShardID ↦ Seq(HLC)] for parallel commit
+    commitThresholds, \* [txnId ↦ [shard ↦ Nat]]
+    shardMap,         \* [node ↦ SUBSET Shards]
     crashed           \* Set of crashed nodes
 
 (*--------------------------- Type Definitions ----------------------------*)
 HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
-    [ type: {"add_child", "add_sibling", "remove_node", 
+    [ type: {"add_child", "add_sibling", "remove_node", "move_shard",
             "set_property", "reparent_subtree", "remove_property", 
             "batch_update", "create_root", "remove_subtree", "batch_structure",
             "move_child"},
@@ -45,26 +48,29 @@ SceneOp ==
       value: STRING,     \* For set_property
       new_parent: NodeID,  \* For reparent_subtree
       new_sibling: NodeID, \* For reparent_subtree
-      updates: Seq([node: NodeID, key: STRING, value: STRING]), \* For batch_update
-      structure_ops: Seq(SceneOp) ]  \* For batch_structure
+      updates: Seq([node: NodeID, key: STRING, value: STRING]),
+      structure_ops: Seq(SceneOp),
+      new_shard: Shards ]  \* For move_shard
 
 TxnState ==
     [ txnId: Nat,
-      status: {"PREPARED", "COMMITTED", "ABORTED"},
+      status: {"PREPARED", "COMMITTING", "COMMITTED", "ABORTED"},
       shards: SUBSET Shards,
+      coordShard: Shards,  \* Coordinator shard for parallel commit
       hlc: HLC,
       ops: Seq(SceneOp) ]
 
 JSON == [key ↦ STRING]  \* Simplified JSON representation
 
 (*-------------------------- Raft-HLC Integration --------------------------*)
-LogEntry == [term: Nat, cmd: SceneOp ∨ TxnState, hlc: HLC]
+ShardLogEntry == [term: Nat, cmd: SceneOp ∨ TxnState, hlc: HLC, shard: Shards]
 
-LeaderAppend(op) ==
-    LET entry == [term ↦ currentTerm[self], cmd ↦ op, hlc ↦ HLC]
-    IN  ∧ log' = [log EXCEPT ![self] = Append(log[self], entry)]
-        ∧ SendToAll(entry)
+LeaderAppend(shard, op) ==
+    LET entry == [term ↦ shardTerms[shard], cmd ↦ op, hlc ↦ HLC, shard ↦ shard]
+    IN  ∧ shardLogs' = [shardLogs EXCEPT ![shard] = Append(shardLogs[shard], entry)]
+        ∧ SendToShard(shard, entry)
         ∧ AdvanceHLC()
+        ∧ UNCHANGED <<shardTerms, shardCommitIndex>>
 
 (*-------------------------- Scene Tree Operations -----------------------*)
 ApplySceneOp(op) ==
@@ -179,42 +185,72 @@ ApplySceneOp(op) ==
                 new_order == SubSeq(filtered, 1, adj_idx) ◦ <<c>> ◦ SubSeq(filtered, adj_idx+1, Len(filtered))
             IN
             sceneState' = RebuildSiblingLinks(p, new_order)
+    [] op.type = "move_shard" →
+        ∧ IF Cardinality(Server) = 1 
+            THEN shardMap' = [shardMap EXCEPT ![op.node] = @ ∪ {op.new_shard}]
+            ELSE ∧ shardMap' = [shardMap EXCEPT ![op.node] = {op.new_shard}]
+                ∧ LeaderAppend(op.new_shard, [type: "shard_leave", node: op.node, 
+                                            old_shard: shardMap[op.node]])
+        ∧ LET stateEntry == [type: "state_transfer", node: op.node, 
+                             state: sceneState[op.node], hlc: HLC]
+          IN LeaderAppend(op.new_shard, stateEntry)
+        ∧ IF Cardinality(Server) > 1 
+            THEN ∀ s ∈ shardMap[op.node] :
+                    LeaderAppend(s, [type: "shard_remove", node: op.node])
+            ELSE UNCHANGED shardLogs
+        ∧ UNCHANGED <<sceneState>>  \* Structural changes handled via state transfer
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
     ∧ n ∈ crashed
     ∧ appliedIndex' = [appliedIndex EXCEPT ![n] = 0]
-    ∧ WHILE appliedIndex[n] < commitIndex[n] DO
-        LET entry = log[n][appliedIndex[n] + 1]
-        IN  ApplySceneOp(entry.cmd)
+    ∧ WHILE appliedIndex[n] < shardCommitIndex[n] DO
+        LET entry = shardLogs[shard][appliedIndex[n] + 1]
+        IN  CASE entry.cmd.type = "state_transfer" →
+                sceneState' = [sceneState EXCEPT ![entry.cmd.node] = entry.cmd.state]
+            [] OTHER →
+                IF entry.shard ∈ shardMap[n] THEN ApplySceneOp(entry.cmd) ELSE UNCHANGED
         ∧ appliedIndex' = [appliedIndex EXCEPT ![n] = appliedIndex[n] + 1]
     ∧ crashed' = crashed ∖ {n}
 
-(*-------------------------- Transaction Cleanup --------------------------*)
-CleanupTxn(txnId) ==
-    ∧ pendingTxns[txnId].status ∈ {"COMMITTED", "ABORTED"}
-    ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId] = UNDEFINED]
-    ∧ intents' = [intents EXCEPT ![txnId] = UNDEFINED]
+(*-------------------------- Parallel Commit Protocol -----------------------*)
+StartParallelCommit(txn) ==
+    LET coordShard == CHOOSE s ∈ txn.shards : TRUE
+    LET txnEntry == [txn EXCEPT !.status = "COMMITTING", !.coordShard = coordShard]
+    IN
+    ∧ pendingTxns' = [pendingTxns EXCEPT ![txn.txnId] = txnEntry]
+    ∧ ∀ s ∈ txn.shards : 
+        IF s = coordShard
+        THEN LeaderAppend(s, txnEntry)
+        ELSE LeaderAppend(s, [type: "COMMIT", txnId: txn.txnId, hlc: txn.hlc])
 
-(*-------------------------- Intent Timeout --------------------------*)
-CheckIntentTimeout(txnId) ==
-    ∧ pendingTxns[txnId].status = "PREPARED"
-    ∧ ∃ shard ∈ pendingTxns[txnId].shards: 
-        intents[txnId][shard] = "PENDING" 
-        ∧ pc[self] - pendingTxns[txnId].hlc > MaxLatency
-    ∧ AbortTxn(txnId)
+CheckParallelCommit(txnId) ==
+    LET txn == pendingTxns[txnId]
+    LET committedInShard(s) ==
+        ∃ idx ∈ 1..Len(shardLogs[s]) : 
+            ∧ shardLogs[s][idx].cmd.txnId = txnId
+            ∧ idx ≤ shardCommitIndex[s]
+    IN
+    IF ∀ s ∈ txn.shards : committedInShard(s)
+    THEN ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
+         ∧ ApplyTxnOps(txn.ops)
+    ELSE IF pc[self] - txn.hlc > MaxLatency
+    THEN AbortTxn(txnId)
 
 (*---------------------- Transaction Handling -----------------------*)
 CheckConflicts(txn) ==
-    LET committedOps == UNION { {entry.cmd} : n ∈ Server, entry ∈ log[n][1..commitIndex[n]] }
+    LET committedOps == UNION { {entry.cmd} : s ∈ Shards, entry ∈ shardLogs[s][1..shardCommitIndex[s]] }
     IN
     ∀ op ∈ txn.ops:
         ∀ entry ∈ committedOps:
-            ∃ op2 ∈ CASE entry.type ∈ {"COMMIT"} → pendingTxns[entry.txnId].ops
-                    [] OTHER → {entry} :
-                Conflict(op, op2) 
-                ∧ entry.hlc < txn.hlc 
+            CASE entry.type = "COMMIT" :
+                ∃ op2 ∈ pendingTxns[entry.txnId].ops : 
+                    Conflict(op, op2) ∧ entry.hlc < txn.hlc
+            [] OTHER :
+                Conflict(op, entry) ∧ entry.hlc < txn.hlc
             ⇒ AbortTxn(txn.txnId)
+    ∧ ∀ s ∈ txn.shards :
+        preparedHLCs[s] = Append(preparedHLCs[s], txn.hlc)
 
 Conflict(op1, op2) ==
     ∨ (op1.node = op2.node ∧ (IsWrite(op1) ∧ IsWrite(op2)) 
@@ -232,11 +268,11 @@ IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree
 
 (*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
-    ∀ n1, n2 ∈ Server:
-        ∀ i ∈ 1..Len(log[n1]):
-            ∀ j ∈ 1..Len(log[n2]):
-                log[n1][i].hlc < log[n2][j].hlc ⇒ 
-                    ¬∃ op1 ∈ log[n1][i].cmd, op2 ∈ log[n2][j].cmd : 
+    ∀ s1, s2 ∈ Shards:
+        ∀ i ∈ 1..Len(shardLogs[s1]):
+            ∀ j ∈ 1..Len(shardLogs[s2]):
+                shardLogs[s1][i].hlc < shardLogs[s2][j].hlc ⇒ 
+                    ¬∃ op1 ∈ shardLogs[s1][i].cmd, op2 ∈ shardLogs[s2][j].cmd : 
                         Conflict(op1, op2)
 
 NoOrphanNodes ==
@@ -266,24 +302,30 @@ TransactionAtomicity ==
                 [] OTHER → TRUE
 
 NoDanglingIntents ==
-    ∀ txn ∈ pendingTxns:
-        txn.status = "COMMITTED" ⇒ ∀ shard ∈ txn.shards: intents[txn.txnId][shard] = "ACK"
+    ∀ txn ∈ DOMAIN pendingTxns:
+        pendingTxns[txn].status = "COMMITTED" ⇒ 
+            ∀ s ∈ pendingTxns[txn].shards:
+                ∃! entry ∈ shardLogs[s] : entry.cmd.txnId = txn
 
 CrossShardAtomicity ==
+    ∀ t1, t2 ∈ pendingTxns :
+        t1 ≠ t2 ∧ t1.status ≠ "ABORTED" ∧ t2.status ≠ "ABORTED"
+        ∧ ∃ s ∈ t1.shards ∩ t2.shards
+        ⇒ ¬∃ op1 ∈ t1.ops, op2 ∈ t2.ops : Conflict(op1, op2)
     ∀ t1, t2 ∈ pendingTxns:
         t1 ≠ t2 ∧ ∃ node: shardMap[node] ∈ t1.shards ∩ t2.shards
         ⇒ ¬∃ op1 ∈ t1.ops, op2 ∈ t2.ops: Conflict(op1, op2)
 
 NoPartialBatches ==
-    ∀ entry ∈ UNION {log[n] : n ∈ Server} :
+    ∀ entry ∈ UNION {shardLogs[s] : s ∈ Shards} :
         entry.cmd.type = "batch_update" ⇒
             ∀ update ∈ entry.cmd.updates :
-                ∃! e ∈ log : e.hlc = entry.hlc ∧ e.cmd.node = update.node
+                ∃! e ∈ UNION {shardLogs[s] : s ∈ Shards} : e.hlc = entry.hlc ∧ e.cmd.node = update.node
 
 PropertyTombstoneConsistency ==  
     ∀ n ∈ DOMAIN sceneState :
         ∀ k ∈ DOMAIN sceneState[n].properties :
-            ∃! e ∈ log : 
+            ∃! e ∈ UNION {shardLogs[s] : s ∈ Shards} : 
                 e.cmd.node = n ∧ 
                 e.cmd.key = k ∧ 
                 (e.cmd.type = "set_property" ∨ e.cmd.type = "remove_property")
@@ -292,7 +334,9 @@ SiblingOrderConsistency ==
     ∀ p ∈ DOMAIN sceneState:
         LET children == OrderedChildren(p) IN
         ∀ i ∈ 1..Len(children)-1:
-            sceneState[children[i]].right_sibling = children[i+1]
+            sceneState[children[i]].right_sibling = children[i+1]            
+ParallelCommitConsistency ==
+    ∀ txn ∈ pendingTxns : txn.status = "COMMITTED" ⇒ ∀ s ∈ txn.shards : ∃! e ∈ shardLogs[s] : e.cmd.txnId = txn.txnId
 
 (*-------------------------- Configuration ---------------------------------*)
 ASSUME 
@@ -302,8 +346,13 @@ ASSUME
     ∧ GodotNodes ≠ {}
     ∧ NodeID ⊆ 1..1000
     ∧ IsValidLCRSTree(GodotNodes)
-    ∧ shardMap ∈ [NodeID → Shards]
-    ∧ intents = [txnId ∈ {} ↦ [shard ∈ Shards ↦ "PENDING"]]
+    ∧ IF Cardinality(Server) = 1
+        THEN ∀ n ∈ NodeID : shardMap[n] = Shards
+        ELSE ∧ ∀ n ∈ NodeID : Cardinality(shardMap[n]) = 1
+             ∧ ∀ s ∈ Shards : 
+                 Cardinality({n ∈ NodeID : s ∈ shardMap[n]}) ≥ 3
+             ∧ ∀ n ∈ NodeID : ∃! s ∈ Shards : s ∈ shardMap[n]
+    ∧ preparedHLCs = [s ∈ Shards ↦ << >>]
     ∧ crashed = {} 
 
 =============================================================================
