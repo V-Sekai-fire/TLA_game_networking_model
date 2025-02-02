@@ -31,7 +31,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", 
-            "set_property", "get_property", "reparent_subtree", 
+            "set_property", "reparent_subtree", 
             "remove_property", "batch_update"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
@@ -102,9 +102,6 @@ ApplySceneOp(op) ==
     [] op.type = "set_property" →
         sceneState' = [sceneState EXCEPT
                       ![op.node].properties[op.key] = op.value ]
-    [] op.type = "get_property" →
-        \* Read operation preserves state
-        UNCHANGED sceneState
     [] op.type = "reparent_subtree" →
         LET originalParent == CHOOSE p ∈ DOMAIN sceneState : 
                                 sceneState[p].left_child = op.node ∨ 
@@ -128,53 +125,53 @@ ApplySceneOp(op) ==
         IN
         sceneState' = FoldLeft(ApplySingleUpdate, sceneState, op.updates)
 
-ApplyCommittedOps() ==
-    WHILE appliedIndex[self] < commitIndex[self] DO
-        LET entry = log[self][appliedIndex[self] + 1]
-        IN  CASE entry.cmd.type ∈ DOMAIN ApplySceneOp →
-                    ApplySceneOp(entry.cmd)
-              [] entry.cmd.type = "COMMIT" →
-                    IF ∀ shard ∈ pendingTxns[entry.cmd.txnId].shards: 
-                         intents[entry.cmd.txnId][shard] = "ACK"
-                      THEN ApplyTxnOps(pendingTxns[entry.cmd.txnId].ops)
-                      ELSE AbortTxn(entry.cmd.txnId)
-        appliedIndex' = [appliedIndex EXCEPT ![self] = appliedIndex[self] + 1]
+(*-------------------------- Crash Recovery --------------------------*)
+RecoverNode(n) ==
+    ∧ n ∈ crashed
+    ∧ appliedIndex' = [appliedIndex EXCEPT ![n] = 0]
+    ∧ WHILE appliedIndex[n] < commitIndex[n] DO
+        LET entry = log[n][appliedIndex[n] + 1]
+        IN  ApplySceneOp(entry.cmd)
+        ∧ appliedIndex' = [appliedIndex EXCEPT ![n] = appliedIndex[n] + 1]
+    ∧ crashed' = crashed ∖ {n}
+
+(*-------------------------- Transaction Cleanup --------------------------*)
+CleanupTxn(txnId) ==
+    ∧ pendingTxns[txnId].status ∈ {"COMMITTED", "ABORTED"}
+    ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId] = UNDEFINED]
+    ∧ intents' = [intents EXCEPT ![txnId] = UNDEFINED]
+
+(*-------------------------- Intent Timeout --------------------------*)
+CheckIntentTimeout(txnId) ==
+    ∧ pendingTxns[txnId].status = "PREPARED"
+    ∧ ∃ shard ∈ pendingTxns[txnId].shards: 
+        intents[txnId][shard] = "PENDING" 
+        ∧ pc[self] - pendingTxns[txnId].hlc > MaxLatency
+    ∧ AbortTxn(txnId)
 
 (*---------------------- Transaction Handling -----------------------*)
-PrepareTxn(txn) ==
-    ∧ txn ∈ pendingTxns
-    ∧ ∀ shard ∈ txn.shards:
-        SendIntent(shard, txn)
-    ∧ intents' = [intents EXCEPT ![txn.txnId][shard] = "PENDING" FOR shard ∈ txn.shards]
-
-AckIntent(txnId, shard) ==
-    ∧ intents[txnId][shard] = "PENDING"
-    ∧ intents' = [intents EXCEPT ![txnId][shard] = "ACK"]
-
 CheckConflicts(txn) ==
+    LET committedOps == UNION { {entry.cmd} : n ∈ Server, entry ∈ log[n][1..commitIndex[n]] }
+    IN
     ∀ op ∈ txn.ops:
-        ∀ other ∈ pendingTxns:
-            other ≠ txn 
-            ∧ ∃ op2 ∈ other.ops: 
+        ∀ entry ∈ committedOps:
+            ∃ op2 ∈ CASE entry.type ∈ {"COMMIT"} → pendingTxns[entry.txnId].ops
+                    [] OTHER → {entry} :
                 Conflict(op, op2) 
-                ∧ other.hlc < txn.hlc 
-            ⇒ AbortTxn(other.txnId)
+                ∧ entry.hlc < txn.hlc 
+            ⇒ AbortTxn(txn.txnId)
 
 Conflict(op1, op2) ==
-    ∨ (op1.node = op2.node ∧ (
-           (op1.type ∉ {"set_property", "remove_property", "get_property"} ∨ 
-            op2.type ∉ {"set_property", "remove_property", "get_property"}) 
-           ∨ (op1.key = op2.key ∧ 
-              (op1.type ∈ {"set_property", "remove_property"} ∨ 
-               op2.type ∈ {"set_property", "remove_property"}))
-       ))
-    ∨ (op1.type ∈ {"reparent_subtree", "remove_node"} ∧ 
-       op2.node ∈ Descendants(op1.node))
-    ∨ (op2.type ∈ {"reparent_subtree", "remove_node"} ∧ 
-       op1.node ∈ Descendants(op2.node))
+    ∨ (op1.node = op2.node ∧ (IsWrite(op1) ∧ IsWrite(op2)) 
+       ∧ (op1.key = op2.key ∨ op1.type ∉ {"set_property", "remove_property"}))
+    ∨ (IsTreeMod(op1) ∧ op2.node ∈ Descendants(op1.node))
+    ∨ (IsTreeMod(op2) ∧ op1.node ∈ Descendants(op2.node))
+
+IsWrite(op) == op.type ∈ {"set_property", "remove_property"}
+IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
-CausalConsistency ==
+Linearizability ==
     ∀ n1, n2 ∈ Server:
         ∀ i ∈ 1..Len(log[n1]):
             ∀ j ∈ 1..Len(log[n2]):
@@ -195,8 +192,7 @@ NoOrphanNodes ==
 
 TransactionAtomicity ==
     ∀ txn ∈ pendingTxns:
-        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : 
-            op.type ≠ "get_property" ⇒ op ∈ DOMAIN sceneState
+        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : op ∈ DOMAIN sceneState
         txn.status = "ABORTED" ⇒ ∀ op ∈ txn.ops : op ∉ DOMAIN sceneState
 
 NoDanglingIntents ==
