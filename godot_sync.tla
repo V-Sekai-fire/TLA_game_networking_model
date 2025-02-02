@@ -19,7 +19,12 @@ VARIABLES
     (* Godot Scene State *)
     sceneState,         \* [node ↦ [left_child, right_sibling, properties]]
     pendingTxns,       \* [txnId ↦ [status, shards, hlc, ops]]
-    appliedIndex       \* Last applied log index per node
+    appliedIndex,      \* Last applied log index per node
+    
+    (* New Variables *)
+    intents,           \* [txnId ↦ [shard ↦ {"PENDING", "ACK"}]] 
+    shardMap,         \* [node ↦ shard]
+    crashed           \* Set of crashed nodes
 
 (*--------------------------- Type Definitions ----------------------------*)
 HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
@@ -89,8 +94,36 @@ ApplyCommittedOps() ==
         IN  CASE entry.cmd.type ∈ {"add_child", "add_sibling", "remove_node", "update_property"} →
                     ApplySceneOp(entry.cmd)
               [] entry.cmd.type = "COMMIT" →
-                    ApplyTxnOps(pendingTxns[entry.cmd.txnId].ops)
+                    IF ∀ shard ∈ pendingTxns[entry.cmd.txnId].shards: 
+                         intents[entry.cmd.txnId][shard] = "ACK"
+                      THEN ApplyTxnOps(pendingTxns[entry.cmd.txnId].ops)
+                      ELSE AbortTxn(entry.cmd.txnId)
         appliedIndex' = [appliedIndex EXCEPT ![self] = appliedIndex[self] + 1]
+
+(*---------------------- New Transaction Handling -----------------------*)
+PrepareTxn(txn) ==
+    ∧ txn ∈ pendingTxns
+    ∧ ∀ shard ∈ txn.shards:
+        SendIntent(shard, txn)
+    ∧ intents' = [intents EXCEPT ![txn.txnId][shard] = "PENDING" FOR shard ∈ txn.shards]
+
+AckIntent(txnId, shard) ==
+    ∧ intents[txnId][shard] = "PENDING"
+    ∧ intents' = [intents EXCEPT ![txnId][shard] = "ACK"]
+
+CheckConflicts(txn) ==
+    ∀ op ∈ txn.ops:
+        ∀ other ∈ pendingTxns:
+            other ≠ txn 
+            ∧ ∃ op2 ∈ other.ops: 
+                Conflict(op, op2) 
+                ∧ other.hlc < txn.hlc 
+            ⇒ AbortTxn(other.txnId)
+
+Conflict(op1, op2) ==
+    ∨ (op1.node = op2.node ∧ op1.type ≠ "update_property")
+    ∨ (op1.type = "remove_node" ∧ op2.node ∈ Descendants(op1.node))
+    ∨ (op2.type = "remove_node" ∧ op1.node ∈ Descendants(op2.node))
 
 (*-------------------------- Safety Invariants ----------------------------*)
 CausalConsistency ==
@@ -117,6 +150,16 @@ TransactionAtomicity ==
         txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : op ∈ DOMAIN sceneState
         txn.status = "ABORTED" ⇒ ∀ op ∈ txn.ops : op ∉ DOMAIN sceneState
 
+(*--------------------- New Safety Invariants ---------------------*)
+NoDanglingIntents ==
+    ∀ txn ∈ pendingTxns:
+        txn.status = "COMMITTED" ⇒ ∀ shard ∈ txn.shards: intents[txn.txnId][shard] = "ACK"
+
+CrossShardAtomicity ==
+    ∀ t1, t2 ∈ pendingTxns:
+        t1 ≠ t2 ∧ ∃ node: shardMap[node] ∈ t1.shards ∩ t2.shards
+        ⇒ ¬∃ op1 ∈ t1.ops, op2 ∈ t2.ops: Conflict(op1, op2)
+
 (*-------------------------- Configuration ---------------------------------*)
 ASSUME 
     ∧ Cardinality(Server) = 3
@@ -124,6 +167,9 @@ ASSUME
     ∧ MaxLatency = 16
     ∧ GodotNodes ≠ {}
     ∧ NodeID ⊆ 1..1000
-    ∧ IsValidLCRSTree(GodotNodes)  \* Ensure initial tree follows LCRS structure
+    ∧ IsValidLCRSTree(GodotNodes)
+    ∧ shardMap ∈ [NodeID → Shards]  \* Initial shard assignment
+    ∧ intents = [txnId ∈ {} ↦ [shard ∈ Shards ↦ "PENDING"]]  \* Empty initial intents
+    ∧ crashed = {}  \* All nodes start alive
 
 =============================================================================
