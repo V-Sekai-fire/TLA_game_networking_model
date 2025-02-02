@@ -32,7 +32,8 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", 
             "set_property", "reparent_subtree", 
-            "remove_property", "batch_update"},
+            "remove_property", "batch_update",
+            "remove_subtree", "batch_structure"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
       node: NodeID,     \* Node to act on
@@ -41,7 +42,8 @@ SceneOp ==
       value: STRING,     \* For set_property
       new_parent: NodeID,  \* For reparent_subtree
       new_sibling: NodeID, \* For reparent_subtree
-      updates: Seq([node: NodeID, key: STRING, value: STRING]) ]  \* For batch_update
+      updates: Seq([node: NodeID, key: STRING, value: STRING]), \* For batch_update
+      structure_ops: Seq(SceneOp) ]  \* For batch_structure
 
 TxnState ==
     [ txnId: Nat,
@@ -70,6 +72,9 @@ ApplySceneOp(op) ==
             [] sceneState[p].right_sibling = n →
                 sceneState' = [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
         ESAC
+    LET Descendants(n) == 
+        LET Children == { sceneState[n].left_child } ∪ { m ∈ DOMAIN sceneState : ∃ k ∈ DOMAIN sceneState : m = sceneState[k].right_sibling }
+        IN  IF Children = {} THEN {n} ELSE {n} ∪ UNION { Descendants(c) : c ∈ Children } 
     IN
     CASE op.type = "add_child" →
         LET target == op.target IN
@@ -99,6 +104,16 @@ ApplySceneOp(op) ==
                   [sceneState[X] EXCEPT !.right_sibling = sceneState[M].right_sibling]
               ELSE
                   sceneState[X] ]
+    [] op.type = "remove_subtree" →
+        LET node == op.node IN
+        LET descendants == Descendants(node) IN
+        ∧ ∀ n ∈ descendants:
+            sceneState' = [sceneState EXCEPT ![n] = UNDEFINED]
+        ∧ ∀ parent ∈ DOMAIN sceneState:
+            IF sceneState[parent].left_child ∈ descendants THEN
+                sceneState' = [sceneState EXCEPT ![parent].left_child = NULL]
+            ELSE IF sceneState[parent].right_sibling ∈ descendants THEN
+                sceneState' = [sceneState EXCEPT ![parent].right_sibling = NULL]
     [] op.type = "set_property" →
         sceneState' = [sceneState EXCEPT
                       ![op.node].properties[op.key] = op.value ]
@@ -124,6 +139,11 @@ ApplySceneOp(op) ==
             [s EXCEPT ![update.node].properties[update.key] = update.value]
         IN
         sceneState' = FoldLeft(ApplySingleUpdate, sceneState, op.updates)
+    [] op.type = "batch_structure" →
+        LET ApplyOp(state, op) ==
+            IF op.type ∈ DOMAIN SceneOperations THEN ApplySceneOp(op) ELSE state
+        IN
+        sceneState' = FoldLeft(ApplyOp, sceneState, op.structure_ops)
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
@@ -164,11 +184,11 @@ CheckConflicts(txn) ==
 Conflict(op1, op2) ==
     ∨ (op1.node = op2.node ∧ (IsWrite(op1) ∧ IsWrite(op2)) 
        ∧ (op1.key = op2.key ∨ op1.type ∉ {"set_property", "remove_property"}))
-    ∨ (IsTreeMod(op1) ∧ op2.node ∈ Descendants(op1.node))
-    ∨ (IsTreeMod(op2) ∧ op1.node ∈ Descendants(op2.node))
+    ∨ (IsTreeMod(op1) ∧ (op2.node ∈ Descendants(op1.node) ∨ op1.node ∈ Descendants(op2.node)))
+    ∨ (IsTreeMod(op2) ∧ (op1.node ∈ Descendants(op2.node) ∨ op2.node ∈ Descendants(op1.node)))
 
 IsWrite(op) == op.type ∈ {"set_property", "remove_property"}
-IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node"}
+IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
@@ -192,8 +212,18 @@ NoOrphanNodes ==
 
 TransactionAtomicity ==
     ∀ txn ∈ pendingTxns:
-        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : op ∈ DOMAIN sceneState
-        txn.status = "ABORTED" ⇒ ∀ op ∈ txn.ops : op ∉ DOMAIN sceneState
+        txn.status = "COMMITTED" ⇒ 
+            ∀ op ∈ txn.ops:
+                CASE op.type = "add_child" ∨ op.type = "add_sibling" →
+                    op.new_node ∈ DOMAIN sceneState
+                [] op.type = "remove_node" ∨ op.type = "remove_subtree" →
+                    op.node ∉ DOMAIN sceneState
+                [] OTHER → TRUE
+        txn.status = "ABORTED" ⇒ 
+            ∀ op ∈ txn.ops:
+                CASE op.type = "add_child" ∨ op.type = "add_sibling" →
+                    op.new_node ∉ DOMAIN sceneState
+                [] OTHER → TRUE
 
 NoDanglingIntents ==
     ∀ txn ∈ pendingTxns:
