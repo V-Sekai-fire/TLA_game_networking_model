@@ -32,7 +32,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", 
             "set_property", "reparent_subtree", 
-            "remove_property", "batch_update",
+            "remove_property", "batch_update", "create_root",
             "remove_subtree", "batch_structure"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
@@ -144,6 +144,9 @@ ApplySceneOp(op) ==
             IF op.type ∈ DOMAIN SceneOperations THEN ApplySceneOp(op) ELSE state
         IN
         sceneState' = FoldLeft(ApplyOp, sceneState, op.structure_ops)
+    [] op.type = "create_root" →  \* Root creation
+        LET new == op.new_node IN
+        sceneState' = [sceneState EXCEPT ![new] = [left_child ↦ NULL, right_sibling ↦ NULL, properties ↦ op.properties]]
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
@@ -184,11 +187,12 @@ CheckConflicts(txn) ==
 Conflict(op1, op2) ==
     ∨ (op1.node = op2.node ∧ (IsWrite(op1) ∧ IsWrite(op2)) 
        ∧ (op1.key = op2.key ∨ op1.type ∉ {"set_property", "remove_property"}))
+    ∨ (op1.type = "create_root" ∧ op2.type = "create_root" ∧ op1.new_node = op2.new_node)
     ∨ (IsTreeMod(op1) ∧ (op2.node ∈ Descendants(op1.node) ∨ op1.node ∈ Descendants(op2.node)))
     ∨ (IsTreeMod(op2) ∧ (op1.node ∈ Descendants(op2.node) ∨ op2.node ∈ Descendants(op1.node)))
 
 IsWrite(op) == op.type ∈ {"set_property", "remove_property"}
-IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree"}
+IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree", "create_root"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
@@ -214,14 +218,14 @@ TransactionAtomicity ==
     ∀ txn ∈ pendingTxns:
         txn.status = "COMMITTED" ⇒ 
             ∀ op ∈ txn.ops:
-                CASE op.type = "add_child" ∨ op.type = "add_sibling" →
+                CASE op.type ∈ {"add_child", "add_sibling", "create_root"} →
                     op.new_node ∈ DOMAIN sceneState
                 [] op.type = "remove_node" ∨ op.type = "remove_subtree" →
                     op.node ∉ DOMAIN sceneState
                 [] OTHER → TRUE
         txn.status = "ABORTED" ⇒ 
             ∀ op ∈ txn.ops:
-                CASE op.type = "add_child" ∨ op.type = "add_sibling" →
+                CASE op.type ∈ {"add_child", "add_sibling", "create_root"} →
                     op.new_node ∉ DOMAIN sceneState
                 [] OTHER → TRUE
 
