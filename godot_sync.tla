@@ -1,16 +1,19 @@
 ----------------------------- MODULE GodotSync -----------------------------
-EXTENDS Integers, Sequences, TLC, FiniteSets
+EXTENDS Integers, Sequences, TLC, FiniteSets, hlc
 
 (*
-    A complete specification for a leader-based Godot node tree synchronization
-    system using Raft consensus, parallel commits, and hybrid logical clocks.
+    Combined specification integrating:
+    - Raft-based Godot node synchronization
+    - CockroachDB-style parallel commits
+    - External HLC implementation
 *)
 
 CONSTANTS
     Nodes,              \* {n1, n2, n3}
     NodeTree,           \* Initial Godot scene tree
     Shards,             \* {s1, s2} if using multi-shard
-    MaxLatency          \* Maximum network delay (e.g., 16)
+    MaxLatency,         \* Maximum network delay (e.g., 16)
+    STOP, EPS           \* From HLC module
 
 VARIABLES
     (* Raft State *)
@@ -19,8 +22,11 @@ VARIABLES
     log,                \* Log entries (containing Godot operations)
     commitIndex,        \* Highest log entry known to be committed
     
-    (* HLC Clocks *)
-    hlc,                \* Hybrid logical clocks [node ↦ (physical, logical)]
+    (* HLC State (from external module) *)
+    pt,                 \* Physical time
+    msg,                \* Message clocks
+    l, c,               \* HLC components
+    pc,                 \* Process counters
     
     (* Parallel Commits *)
     pendingTxns,        \* {txnId: [shards: SUBSET Shards, status: IntentStatus]}
@@ -39,39 +45,40 @@ SceneOp ==
 IntentStatus == {"PREPARED", "COMMITTED", "ABORTED"}
 TxnState == [ txnId: Nat, shards: SUBSET Shards, status: IntentStatus ]
 
-HLC == [physical: Nat, logical: Nat]
+HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 (*---------------------------- Raft Integration ----------------------------*)
 LogEntry == [term: Nat, cmd: SceneOp, hlc: HLC]
 
 RaftLeaderUpdate ==
-    LET entry == [term ↦ currentTerm, cmd ↦ NextSceneOp(), hlc ↦ hlc[self]]
+    LET entry == [term ↦ currentTerm, cmd ↦ NextSceneOp(), hlc ↦ HLC]
     IN  ∧ LeaderAppendLog(entry)
-        ∧ UpdateHLC()
-        ∧ BroadcastAppendEntries(entry)
+        ∧ SendToAll(entry)  \* Triggers HLC Send process
+        ∧ UNCHANGED <<pt, msg, l, c>>
 
 HandleAppendEntries(entries) ==
     IF FollowerAcceptEntries(entries) THEN
-        UpdateHLC(entries[Len(entries)].hlc)
+        ∧ UpdateFromHLC(entries[Len(entries)].hlc)
+        ∧ RecvFromLeader()  \* Triggers HLC Recv process
     ELSE
         RejectAppendEntries()
 
-(*---------------------------- Hybrid Logical Clock -------------------------*)
-UpdateHLC(observedHLC) ==
-    LET observedPhysical ≜ observedHLC.physical
-        currentPhysical ≜ hlc[self].physical
-        newPhysical ≜ MAX(currentPhysical, observedPhysical)
-        newLogical ≜ IF newPhysical = currentPhysical 
-                     THEN hlc[self].logical + 1 
-                     ELSE 0
-    IN  hlc' = [hlc EXCEPT ![self] = [physical ↦ newPhysical, logical ↦ newLogical]]
+(*---------------------------- HLC Integration ----------------------------*)
+UpdateFromHLC(receivedHLC) ==
+    ∧ msg' = [msg EXCEPT ![self] = receivedHLC]
+    ∧ Recv(self)  \* Use HLC's receive logic
+
+SendToAll(entry) ==
+    ∧ WITH k ∈ Procs \ {self}
+        msg' = [msg EXCEPT ![k] = <<pt[self], l[self], c[self]>>]
+    ∧ Send(self)  \* Use HLC's send logic
 
 (*---------------------------- Parallel Commits ----------------------------*)
 PrepareTransaction(txnId, shards, cmd) ==
     ∧ txnId ∉ DOMAIN pendingTxns
     ∧ pendingTxns' = pendingTxns ∪ [txnId ↦ [shards ↦ shards, status ↦ "PREPARED"]]
     ∧ ∀ s ∈ shards: SendIntent(s, txnId, cmd)
-    ∧ UpdateHLC()
+    ∧ Send(self)  \* HLC update on send
 
 CommitTransaction(txnId) ==
     LET txn ≜ pendingTxns[txnId]
@@ -79,11 +86,7 @@ CommitTransaction(txnId) ==
         ∧ ∀ s ∈ txn.shards: ReceivedAck(s, txnId)
         ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
         ∧ ApplySceneOp(txn.cmd)
-
-AbortTransaction(txnId) ==
-    ∧ pendingTxns[txnId].status = "PREPARED"
-    ∧ ∃ s ∈ pendingTxns[txnId].shards: ¬ReceivedAck(s, txnId)
-    ∧ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "ABORTED"]
+        ∧ Recv(self)  \* HLC update on receive
 
 (*---------------------------- Godot Scene Tree ----------------------------*)
 ApplySceneOp(cmd) ==
@@ -94,48 +97,29 @@ ApplySceneOp(cmd) ==
       [] cmd.type = "update_property" →
             sceneState' = UpdateProperty(sceneState, cmd.node, cmd.properties)
 
-AddNode(tree, node, parent, props) ==
-    tree ∪ [node ↦ [parent ↦ parent, properties ↦ props]]
-
-RemoveNode(tree, node) ==
-    [n ∈ DOMAIN tree ↦ IF n = node THEN UNDEFINED ELSE tree[n]]
-
-UpdateProperty(tree, node, props) ==
-    [n ∈ DOMAIN tree ↦ IF n = node 
-                        THEN [tree[n] EXCEPT !.properties = props]
-                        ELSE tree[n]]
-
 (*---------------------------- State Transitions ---------------------------*)
 Next ==
     ∨ RaftLeaderUpdate
     ∨ PrepareTransaction
     ∨ CommitTransaction
-    ∨ AbortTransaction
     ∨ HandleAppendEntries
     ∨ LeaderCrash
     ∨ NetworkPartition
+    ∨ (\E self ∈ Procs: j(self))  \* HLC processes
 
-(*---------------------------- Invariants & Properties ----------------------*)
-TypeInvariant ==
+(*---------------------------- Combined Invariants --------------------------*)
+CombinedInvariants ==
     ∧ RaftInvariant
-    ∧ ∀ n ∈ Nodes: hlc[n].logical ≥ 0
-    ∧ ∀ txn ∈ DOMAIN pendingTxns: pendingTxns[txn].status ∈ IntentStatus
-
-CausalOrdering ==
-    ∀ e1, e2 ∈ log:
-        e1.hlc < e2.hlc ⇒ ¬(e2.cmd \dependsOn e1.cmd)
-
-Linearizability ==
-    ∀ op ∈ ClientOps:
-        ∃ i ∈ 1..Len(log):
-            log[i].cmd = op ∧ IsInstantaneous(log, i)
-
-NoOrphanNodes ==
-    ∀ node ∈ DOMAIN sceneState:
-        sceneState[node].parent ≠ NULL ⇒ sceneState[node].parent ∈ DOMAIN sceneState
+    ∧ TypeOK              \* From HLC
+    ∧ Sync                 \* From HLC
+    ∧ Boundedl             \* From HLC
+    ∧ Boundedc             \* From HLC
+    ∧ NoOrphanNodes
+    ∧ CausalOrdering
 
 (*---------------------------- Configuration ---------------------------------*)
 ASSUME Cardinality(Nodes) = 3
 ASSUME MaxLatency ≤ 16
+ASSUME N = Cardinality(Nodes)  \* HLC process count
 
 =============================================================================
