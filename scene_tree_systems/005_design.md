@@ -1,12 +1,12 @@
 # wants a summary to recreate the discussion
 
-/<think>
+\<think>
 
 Okay, the user has been discussing the implementation of a leader-based event synchronization system for syncing Godot Engine node trees across multiple servers. They wanted a production-ready design with linearizability, low latency, and fault tolerance. I provided a detailed architecture using Raft for sharding, Hybrid Logical Clocks (HLCs) for ordering, and parallel commits inspired by CockroachDB. The user also asked about testing strategies using TLA+ and an Elixir compiler, so I outlined how to model check components and generate tests.
 
 Now, the user needs to go offline and wants a summary to recreate the discussion. I need to encapsulate all the key points: the system design, TLA+ specifications, testing approach, and implementation steps. I should structure it clearly so they can refer back without missing any critical parts. Let me make sure to include the architecture, TLA+ modules, testing steps, and code examples. Also, highlight the main takeaways and resources they might need. Alright, putting it all together concisely.
 
-/</think>
+\</think>
 
 Here's a concise summary of our discussion for easy reference:
 
