@@ -8,122 +8,162 @@ CONSTANTS
     NodeID,            \* 1..1000
     SceneOperations    \* Set of valid scene operations
 
-VARIABLES
-    (* Raft Consensus *)
-    messages, elections, allLogs, currentTerm, state, votedFor, log, commitIndex,
-    votesResponded, votesGranted, voterLog, nextIndex, matchIndex,
+(*--algorithm GodotSync
+variables
+    messages,          \* Network messages
+    elections,         \* Election statuses
+    allLogs,           \* All logs across nodes
+    currentTerm = [n \in NodeID |-> 1],  \* Current term for each node
+    state = [n \in NodeID |-> "follower"],  \* Node state: leader, candidate, follower
+    votedFor = [n \in NodeID |-> NULL], \* Voted for candidate
+    log = [n \in NodeID |-> <<>>],      \* Log entries
+    commitIndex = [n \in NodeID |-> 0], \* Highest committed index
+    votesResponded = [n \in NodeID |-> {}], \* Votes responded
+    votesGranted = [n \in NodeID |-> {}], \* Votes granted
+    voterLog = [n \in NodeID |-> <<>>],  \* Voter logs
+    nextIndex = [n \in NodeID |-> 1],    \* Next index to send
+    matchIndex = [n \in NodeID |-> 0],  \* Match index
+    pt = [n \in NodeID |-> 0],           \* Physical time (HLC)
+    msg = [n \in NodeID |-> 0],          \* Message timestamp (HLC)
+    l = [n \in NodeID |-> 0],            \* Logical clock (HLC)
+    c = [n \in NodeID |-> 0],            \* Counter (HLC)
+    pc = [n \in NodeID |-> 0],           \* Process counter (HLC)
+    sceneState = GodotNodes,            \* Initial scene state
+    pendingTxns = [txnId \in {} |-> <<>>], \* Pending transactions
+    appliedIndex = [n \in NodeID |-> 0]; \* Last applied index
+
+define
+    HLC(n) == <<pt[n], l[n], c[n]>>;
+    JSON == [key |-> STRING];
+    SceneOp == [
+        type: {"add_child", "add_sibling", "remove_node", "update_property"},
+        target: NodeID,
+        new_node: NodeID,
+        node: NodeID,
+        properties: JSON
+    ];
+    TxnState == [
+        txnId: Nat,
+        status: {"PREPARED", "COMMITTED", "ABORTED"},
+        shards: SUBSET Shards,
+        hlc: HLC(self),
+        ops: Seq(SceneOp)
+    ];
+    LogEntry == [term: Nat, cmd: SceneOp \/ TxnState, hlc: HLC(self)];
     
-    (* Hybrid Logical Clocks *)
-    pt, msg, l, c, pc,
+    macro SendToAll(entry) begin
+        messages := messages \union {[to |-> n, data |-> entry] : n \in NodeID};
+    end macro;
     
-    (* Godot Scene State *)
-    sceneState,         \* [node ↦ [left_child, right_sibling, properties]]
-    pendingTxns,       \* [txnId ↦ [status, shards, hlc, ops]]
-    appliedIndex       \* Last applied log index per node
+    macro AdvanceHLC() begin
+        pt[self] := pt[self] + 1;
+        l[self] := Max(l[self], pt[self]);
+        c[self] := 0;
+    end macro;
+    
+    macro LeaderAppend(op) begin
+        with entry = [term |-> currentTerm[self], cmd |-> op, hlc |-> HLC(self)] do
+            log[self] := Append(log[self], entry);
+            SendToAll(entry);
+            AdvanceHLC();
+        end with;
+    end macro;
+    
+    macro ApplySceneOp(op) begin
+        if op.type = "add_child" then
+            sceneState[op.target].left_child := op.new_node;
+            sceneState[op.new_node] := [
+                left_child |-> NULL,
+                right_sibling |-> sceneState[op.target].left_child,
+                properties |-> op.properties
+            ];
+        elsif op.type = "add_sibling" then
+            sceneState[op.target].right_sibling := op.new_node;
+            sceneState[op.new_node] := [
+                left_child |-> NULL,
+                right_sibling |-> sceneState[op.target].right_sibling,
+                properties |-> op.properties
+            ];
+        elsif op.type = "remove_node" then
+            sceneState[op.node].left_child := NULL;
+            with XWithLeft = {X \in DOMAIN sceneState : sceneState[X].left_child = op.node},
+                 YWithRight = {Y \in DOMAIN sceneState : sceneState[Y].right_sibling = op.node} do
+                for X \in XWithLeft do
+                    sceneState[X].left_child := sceneState[op.node].right_sibling;
+                end for;
+                for Y \in YWithRight do
+                    sceneState[Y].right_sibling := sceneState[op.node].right_sibling;
+                end for;
+                sceneState := [x \in DOMAIN sceneState \ {op.node} |-> sceneState[x]];
+            end with;
+        elsif op.type = "update_property" then
+            sceneState[op.node].properties := op.properties;
+        end if;
+    end macro;
+    
+    macro ApplyCommittedOps() begin
+        while appliedIndex[self] < commitIndex[self] do
+            appliedIndex[self] := appliedIndex[self] + 1;
+            with entry = log[self][appliedIndex[self]] do
+                if entry.cmd.type \in {"add_child", "add_sibling", "remove_node", "update_property"} then
+                    ApplySceneOp(entry.cmd);
+                elsif entry.cmd.type = "COMMIT" then
+                    with txn = pendingTxns[entry.cmd.txnId] do
+                        for op \in txn.ops do
+                            ApplySceneOp(op);
+                        end for;
+                    end with;
+                end if;
+            end with;
+        end while;
+    end macro;
+end define;
 
-(*--------------------------- Type Definitions ----------------------------*)
-HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
+process (node \in NodeID)
+variables
+    \* Local variables if needed
+begin
+    NodeLoop:
+    while TRUE do
+        \* Raft Leader Election Logic
+        either
+            \* Follower/Candidate: Handle incoming RPCs
+            with rpc = CHOOSE msg \in messages : msg.to = node do
+                messages := messages \ {rpc};
+                \* Process AppendEntries or RequestVote RPC
+                if rpc.data.term > currentTerm[node] then
+                    currentTerm[node] := rpc.data.term;
+                    state[node] := "follower";
+                    votedFor[node] := NULL;
+                end if;
+                \* Additional RPC handling logic here...
+            end with;
+        or
+            \* Candidate: Start election
+            if state[node] = "follower" /\ election timeout then
+                state[node] := "candidate";
+                currentTerm[node] := currentTerm[node] + 1;
+                votedFor[node] := node;
+                \* Send RequestVote RPCs
+                votesGranted[node] := {node};
+                votesResponded[node] := {node};
+                \* Election logic...
+            end if;
+        or
+            \* Leader: Send heartbeats
+            if state[node] = "leader" then
+                \* Send AppendEntries RPCs
+                LeaderAppend([type |-> "heartbeat"]);
+            end if;
+        end either;
+        
+        \* Apply committed operations
+        ApplyCommittedOps();
+        
+        \* Advance HLC
+        AdvanceHLC();
+    end while;
+end process;
 
-SceneOp ==
-    [ type: {"add_child", "add_sibling", "remove_node", "update_property"},
-      target: NodeID,    \* For add_child/add_sibling: target node
-      new_node: NodeID, \* For add_child/add_sibling: new node ID
-      node: NodeID,     \* For remove_node/update_property: node to act on
-      properties: JSON ]
-
-TxnState ==
-    [ txnId: Nat,
-      status: {"PREPARED", "COMMITTED", "ABORTED"},
-      shards: SUBSET Shards,
-      hlc: HLC,
-      ops: Seq(SceneOp) ]
-
-JSON == [key ↦ STRING]  \* Simplified JSON representation
-
-(*-------------------------- Raft-HLC Integration --------------------------*)
-LogEntry == [term: Nat, cmd: SceneOp ∨ TxnState, hlc: HLC]
-
-LeaderAppend(op) ==
-    LET entry == [term ↦ currentTerm[self], cmd ↦ op, hlc ↦ HLC]
-    IN  ∧ log' = [log EXCEPT ![self] = Append(log[self], entry)]
-        ∧ SendToAll(entry)
-        ∧ AdvanceHLC()
-
-(*-------------------------- Scene Tree Operations -----------------------*)
-ApplySceneOp(op) ==
-    CASE op.type = "add_child" →
-        LET target == op.target IN
-        LET new == op.new_node IN
-        sceneState' = [sceneState EXCEPT
-                      ![target].left_child = new,
-                      ![new] = [ left_child ↦ NULL,
-                                 right_sibling ↦ sceneState[target].left_child,
-                                 properties ↦ op.properties ]]
-      [] op.type = "add_sibling" →
-        LET target == op.target IN
-        LET new == op.new_node IN
-        sceneState' = [sceneState EXCEPT
-                      ![target].right_sibling = new,
-                      ![new] = [ left_child ↦ NULL,
-                                 right_sibling ↦ sceneState[target].right_sibling,
-                                 properties ↦ op.properties ]]
-      [] op.type = "remove_node" →
-        LET M == op.node IN
-        ∧ sceneState[M].left_child = NULL  \* Precondition: no children
-        ∧ LET XWithLeft == {X ∈ DOMAIN sceneState : sceneState[X].left_child = M} IN
-          LET YWithRight == {Y ∈ DOMAIN sceneState : sceneState[Y].right_sibling = M} IN
-          sceneState' = [ X ∈ DOMAIN sceneState ∖ {M} ↦
-              IF X ∈ XWithLeft THEN
-                  [sceneState[X] EXCEPT !.left_child = sceneState[M].right_sibling]
-              ELSE IF X ∈ YWithRight THEN
-                  [sceneState[X] EXCEPT !.right_sibling = sceneState[M].right_sibling]
-              ELSE
-                  sceneState[X] ]
-      [] op.type = "update_property" →
-          sceneState' = [sceneState EXCEPT
-                        ![op.node].properties = op.properties ]
-
-ApplyCommittedOps() ==
-    WHILE appliedIndex[self] < commitIndex[self] DO
-        LET entry = log[self][appliedIndex[self] + 1]
-        IN  CASE entry.cmd.type ∈ {"add_child", "add_sibling", "remove_node", "update_property"} →
-                    ApplySceneOp(entry.cmd)
-              [] entry.cmd.type = "COMMIT" →
-                    ApplyTxnOps(pendingTxns[entry.cmd.txnId].ops)
-        appliedIndex' = [appliedIndex EXCEPT ![self] = appliedIndex[self] + 1]
-
-(*-------------------------- Safety Invariants ----------------------------*)
-CausalConsistency ==
-    ∀ n1, n2 ∈ Server:
-        ∀ i ∈ 1..Len(log[n1]):
-            ∀ j ∈ 1..Len(log[n2]):
-                log[n1][i].hlc < log[n2][j].hlc ⇒ 
-                    ¬∃ op1 ∈ log[n1][i].cmd, op2 ∈ log[n2][j].cmd : 
-                        Conflict(op1, op2)
-
-NoOrphanNodes ==
-    LET Roots == { n ∈ DOMAIN sceneState : 
-                     ∀ m ∈ DOMAIN sceneState : 
-                         n ≠ sceneState[m].left_child ∧ n ≠ sceneState[m].right_sibling } IN
-    LET R(m, n) == n = sceneState[m].left_child ∨ n = sceneState[m].right_sibling IN
-    LET Reachable == { n ∈ DOMAIN sceneState : 
-                         ∃ path ∈ Seq(DOMAIN sceneState) : 
-                             ∧ Head(path) ∈ Roots 
-                             ∧ ∀ i ∈ 1..Len(path)-1 : R(path[i], path[i+1]) } IN
-    DOMAIN sceneState ⊆ Reachable
-
-TransactionAtomicity ==
-    ∀ txn ∈ pendingTxns:
-        txn.status = "COMMITTED" ⇒ ∀ op ∈ txn.ops : op ∈ DOMAIN sceneState
-        txn.status = "ABORTED" ⇒ ∀ op ∈ txn.ops : op ∉ DOMAIN sceneState
-
-(*-------------------------- Configuration ---------------------------------*)
-ASSUME 
-    ∧ Cardinality(Server) = 3
-    ∧ Cardinality(Shards) = 2
-    ∧ MaxLatency = 16
-    ∧ GodotNodes ≠ {}
-    ∧ NodeID ⊆ 1..1000
-    ∧ IsValidLCRSTree(GodotNodes)  \* Ensure initial tree follows LCRS structure
-
+end algorithm;*)
 =============================================================================
