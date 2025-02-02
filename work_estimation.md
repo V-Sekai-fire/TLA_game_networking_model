@@ -11,6 +11,7 @@
 - **Leverage pre-built TLA+ modules**:
   - [Raft (Ongardie)](https://github.com/ongardie/raft.tla) for consensus logic.
   - [Pluscal/TLA+ modeling of Hybrid Logical Clocks and Hybrid Vector Clocks](https://github.com/muratdem/HLC) for hybrid clocks.
+  - [Parallel Commits](https://github.com/oxidecomputer/cockroach/blob/release-22.1-oxide/docs/tla-plus/ParallelCommits/ParallelCommits.tla)
 
 #### **3. Prioritize Critical Properties**
 
