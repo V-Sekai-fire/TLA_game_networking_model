@@ -68,7 +68,3 @@
   - Intent writes with quorum ACKs.
   - Conflict resolution via HLC timestamps.
 - **Latency Budget**: 6ms.
-
----
-
-This modular design ensures **41ms end-to-end latency**, meeting VR requirements while maintaining safety and consistency.
