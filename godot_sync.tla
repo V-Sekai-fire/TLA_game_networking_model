@@ -34,7 +34,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", "move_shard",
-            "set_property", "reparent_subtree", "remove_property", 
+            "set_property", "move_subtree", "remove_property", 
             "batch_update", "create_root", "remove_subtree", "batch_structure",
             "move_child"},
       target: NodeID,    \* For add_child/add_sibling: target node
@@ -46,8 +46,8 @@ SceneOp ==
       properties: JSON, \* Initial properties for new nodes
       key: STRING,      \* For property operations
       value: STRING,     \* For set_property
-      new_parent: NodeID,  \* For reparent_subtree
-      new_sibling: NodeID, \* For reparent_subtree
+      new_parent: NodeID,  \* For move_subtree
+      new_sibling: NodeID, \* For move_subtree
       updates: Seq([node: NodeID, key: STRING, value: STRING]),
       structure_ops: Seq(SceneOp),
       new_shard: Shards ]  \* For move_shard
@@ -142,7 +142,7 @@ ApplySceneOp(op) ==
     [] op.type = "set_property" →
         sceneState' = [sceneState EXCEPT
                       ![op.node].properties[op.key] = op.value ]
-    [] op.type = "reparent_subtree" →
+    [] op.type = "move_subtree" →
         LET originalParent == CHOOSE p ∈ DOMAIN sceneState : 
                                 sceneState[p].left_child = op.node ∨ 
                                 sceneState[p].right_sibling = op.node
@@ -264,7 +264,7 @@ Conflict(op1, op2) ==
        ∧ op1.parent = op2.target)
 
 IsWrite(op) == op.type ∈ {"set_property", "remove_property"}
-IsTreeMod(op) == op.type ∈ {"reparent_subtree", "remove_node", "remove_subtree", "create_root", "move_child"}
+IsTreeMod(op) == op.type ∈ {"move_subtree", "remove_node", "remove_subtree", "create_root", "move_child"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
