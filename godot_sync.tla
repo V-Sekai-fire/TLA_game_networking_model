@@ -186,19 +186,34 @@ ApplySceneOp(op) ==
             IN
             sceneState' = RebuildSiblingLinks(p, new_order)
     [] op.type = "move_shard" →
-        ∧ IF Cardinality(Server) = 1 
-            THEN shardMap' = [shardMap EXCEPT ![op.node] = @ ∪ {op.new_shard}]
-            ELSE ∧ shardMap' = [shardMap EXCEPT ![op.node] = {op.new_shard}]
-                ∧ LeaderAppend(op.new_shard, [type: "shard_leave", node: op.node, 
-                                            old_shard: shardMap[op.node]])
-        ∧ LET stateEntry == [type: "state_transfer", node: op.node, 
-                             state: sceneState[op.node], hlc: HLC]
-          IN LeaderAppend(op.new_shard, stateEntry)
-        ∧ IF Cardinality(Server) > 1 
-            THEN ∀ s ∈ shardMap[op.node] :
-                    LeaderAppend(s, [type: "shard_remove", node: op.node])
-            ELSE UNCHANGED shardLogs
-        ∧ UNCHANGED <<sceneState>>  \* Structural changes handled via state transfer
+        LET old_shards = shardMap[op.node]
+            descendants = Descendants(op.node)  \* Get full subtree
+            original_parent = CHOOSE p ∈ DOMAIN sceneState : 
+                                 sceneState[p].left_child = op.node ∨ 
+                                 sceneState[p].right_sibling = op.node
+        IN ∧ ∀ n ∈ descendants :
+                ∧ LeaderAppend(op.new_shard, [type: "state_transfer", node: n, 
+                                           state: sceneState[n], hlc: HLC])
+                ∧ shardMap' = [shardMap EXCEPT ![n] = {op.new_shard}]
+                ∧ ∀ s ∈ old_shards : 
+                    LeaderAppend(s, [type: "shard_remove", node: n])
+        \* Detach from original parent (cross-shard operation)
+        ∧ IF original_parent ≠ NULL THEN
+            LET detach_op = [type: "detach_child", node: original_parent, child: op.node]
+            IN ∀ s ∈ shardMap[original_parent] :
+                LeaderAppend(s, detach_op)
+        \* Attach to new parent in target shard (atomic with move)
+        ∧ IF op.new_parent ≠ NULL THEN
+            LET attach_op = [type: "attach_child", node: op.new_parent, 
+                            child: op.node, position: op.position]
+            IN LeaderAppend(op.new_shard, attach_op)
+        \* Preserve structure if no new parent (make root)
+        ∧ IF op.new_parent = NULL THEN
+            LeaderAppend(op.new_shard, [type: "create_root", new_node: op.node])
+        \* Cleanup old shard references
+        ∧ ∀ s ∈ old_shards :
+            LeaderAppend(s, [type: "shard_remove", node: op.node])
+        ∧ UNCHANGED <<sceneState>>  \* State transfers handle structure
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
