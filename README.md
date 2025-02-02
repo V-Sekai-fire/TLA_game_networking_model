@@ -1,26 +1,74 @@
-# Final Result: Task Dependency Graph
+# **Component Synopsis**
 
-```mermaid
-gantt
-    title VR Node Sync System Budget (Total: 41ms)
-    dateFormat X
-    axisFormat %Lms
+#### **1. Godot Client (C++)**
 
-    section Client
-    Input Capture           :a1, 0, 5
-    libriscv VM Call        :a2, after a1, 0.003
-    VM Execution            :a3, after a2, 2
-    RPC to Leader           :a4, after a3, 3
+- **Role**: Capture VR input, render synchronized node trees.
+- **Key Features**:
+  - Shared memory buffer for RISC-V VM communication.
+  - Vulkan rendering pipeline optimized for 90 FPS.
+- **Latency Budget**: 25ms (Input + Apply & Render).
 
-    section Leader
-    Raft Append             :a5, after a4, 4
-    Parallel Commit         :a6, after a5, 6
-    HLC Sync                :a7, after a6, 1
+---
 
-    section Client
-    Apply & Render          :a8, after a7, 20
-```
+#### **2. libriscv VM (C++)**
 
-Total End-to-End Latency: 41ms
+- **Role**: Execute user mods safely in a RISC-V sandbox.
+- **Key Features**:
+  - 3ns function call overhead.
+  - JIT/AOT compilation for mods.
+  - Syscall filtering and memory isolation.
+- **Latency Budget**: 2.003ms (Call + Execution).
 
-Critical Path: Input → VM → RPC → Raft → Commit → HLC → Render.
+---
+
+#### **3. Networking Layer (QUIC/HTTP3)**
+
+- **Role**: Transmit node updates between clients and leader.
+- **Key Features**:
+  - 0-RTT handshake reuse.
+  - Packet prioritization (DSCP for Raft traffic).
+- **Latency Budget**: 3ms (RPC to Leader).
+
+---
+
+#### **4. Leader (Elixir)**
+
+- **Role**: Coordinate Raft consensus and parallel commits.
+- **Key Features**:
+  - Raft log replication with dynamic quorums.
+  - Hybrid Logical Clock (HLC) for global ordering.
+- **Latency Budget**: 11ms (Raft + Commit + HLC).
+
+---
+
+#### **5. Followers (Elixir)**
+
+- **Role**: Replicate logs and store intent states.
+- **Key Features**:
+  - Crash recovery via Raft snapshots.
+  - Intent garbage collection.
+- **Latency Budget**: Included in Leader’s 11ms.
+
+---
+
+#### **6. Hybrid Logical Clock (HLC)**
+
+- **Role**: Generate causally ordered timestamps.
+- **Key Features**:
+  - NTP-synced with 1ms precision.
+  - Embedded in Raft entries.
+- **Latency Budget**: 1ms.
+
+---
+
+#### **7. Parallel Commit Protocol**
+
+- **Role**: Ensure atomic commits across followers.
+- **Key Features**:
+  - Intent writes with quorum ACKs.
+  - Conflict resolution via HLC timestamps.
+- **Latency Budget**: 6ms.
+
+---
+
+This modular design ensures **41ms end-to-end latency**, meeting VR requirements while maintaining safety and consistency.
