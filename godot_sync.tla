@@ -79,20 +79,15 @@ LeaderAppend(shard, op) ==
 (*-------------------------- Scene Tree Operations -----------------------*)
 ApplySceneOp(op) ==
     LET RemoveFromOriginalParent(n, p) ==
-        CASE sceneState[p].left_child = n ->
-                sceneState' = [sceneState EXCEPT ![p].left_child = sceneState[n].right_sibling]
-          [] sceneState[p].right_sibling = n ->
-                sceneState' = [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
-        OTHER -> UNCHANGED sceneState
+        IF sceneState[p].left_child = n 
+        THEN sceneState' = [sceneState EXCEPT ![p].left_child = sceneState[n].right_sibling]
+        ELSE IF sceneState[p].right_sibling = n 
+             THEN sceneState' = [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
+             ELSE UNCHANGED sceneState
     IN
     LET Descendants(n) == 
         LET Children == { sceneState[n].left_child } \cup { m \in DOMAIN sceneState : \E k \in DOMAIN sceneState : m = sceneState[k].right_sibling }
         IN  IF Children = {} THEN {n} ELSE {n} \cup UNION { Descendants(c) : c \in Children } 
-    IN
-    LET OrderedChildren(p) ==
-        LET Rec(n) == IF n = NULL THEN << >> 
-                      ELSE Append(Rec(sceneState[n].right_sibling), n)
-        IN Reverse(Rec(sceneState[p].left_child))
     IN
     LET RebuildSiblingLinks(p, children) ==
         IF children = << >> 
