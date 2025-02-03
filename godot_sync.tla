@@ -77,6 +77,11 @@ LeaderAppend(shard, op) ==
         /\ UNCHANGED <<shardTerms, shardCommitIndex>>
 
 (*-------------------------- Scene Tree Operations -----------------------*)
+FilterSeq(seq, elem) ==
+    IF seq = << >> THEN << >>
+    ELSE IF Head(seq) = elem THEN FilterSeq(Tail(seq), elem)
+    ELSE <<Head(seq)>> \o FilterSeq(Tail(seq), elem)
+
 ApplySceneOp(op) ==
     LET RemoveFromOriginalParent(n, p) ==
         IF sceneState[p].left_child = n 
@@ -181,7 +186,7 @@ ApplySceneOp(op) ==
         IF c \notin current \/ adj_idx < 0 \/ adj_idx >= Len(current)
         THEN sceneState
         ELSE
-            LET filtered == [x \in current : x /= c]
+            LET filtered == FilterSeq(current, c)
                 new_order == SubSeq(filtered, 1, adj_idx) \o <<c>> \o SubSeq(filtered, adj_idx+1, Len(filtered))
             IN
             RebuildSiblingLinks(p, new_order)
