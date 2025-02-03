@@ -292,16 +292,17 @@ StartParallelCommit(txn) ==
 
 CheckParallelCommit(txnId) == 
     LET txn == pendingTxns[txnId]
-    LET committedInShard(s) ==
-        \E idx \in 1..Len(shardLogs[s]) : 
-            /\ shardLogs[s][idx].cmd.txnId = txnId
-            /\ idx <= shardCommitIndex[s]
+        committedInShard(s) ==
+            \E idx \in 1..Len(shardLogs[s]) : 
+                /\ shardLogs[s][idx].cmd.txnId = txnId
+                /\ idx <= shardCommitIndex[s]
     IN
     IF \A s \in txn.shards : committedInShard(s)
-    THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status := "COMMITTED"]
+    THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
          /\ ApplyTxnOps(txn.ops)
     ELSE IF HLC_Diff(pc[self], txn.hlc) > MaxLatency
-    THEN AbortTxn(txnId)
+         THEN AbortTxn(txnId)
+         ELSE UNCHANGED <<pendingTxns, shardLogs>>
 
 (*---------------------- Transaction Handling -----------------------*)
 CheckConflicts(txn) ==
@@ -350,19 +351,20 @@ NoOrphanNodes ==
     DOMAIN sceneState \subseteq Reachable
 
 TransactionAtomicity ==
-    \A txn \in pendingTxns:
-        txn.status = "COMMITTED" => 
-            \A op \in txn.ops:
-                CASE op.type \in {"add_child", "add_sibling"} ->
+    \A txn \in DOMAIN pendingTxns:
+        /\ pendingTxns[txn].status = "COMMITTED" => 
+            \A op \in pendingTxns[txn].ops:
+                CASE op.type \in {"add_child", "add_sibling"} -> 
                     op.new_node \in DOMAIN sceneState
-                [] op.type = "remove_node" ->
+                  [] op.type = "remove_node" ->
                     op.node \notin DOMAIN sceneState
-                [] OTHER -> TRUE
-        txn.status = "ABORTED" => 
-            \A op \in txn.ops:
-                CASE op.type \in {"add_child", "add_sibling"} ->
+                  [] OTHER -> TRUE
+        /\ pendingTxns[txn].status = "ABORTED" => 
+            \A op \in pendingTxns[txn].ops:
+                CASE op.type \in {"add_child", "add_sibling"} -> 
                     op.new_node \notin DOMAIN sceneState
-                [] OTHER -> TRUE
+                  [] OTHER -> TRUE
+
 
 NoDanglingIntents ==
     \A txn \in DOMAIN pendingTxns:
