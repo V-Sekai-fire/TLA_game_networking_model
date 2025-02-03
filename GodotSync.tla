@@ -120,6 +120,7 @@ RecursiveRemove(remaining, acc) ==
                             node |-> n ]
          IN RecursiveRemove(Tail(remaining), acc \o <<newEntry>>)
 
+RECURSIVE ApplySceneOp(_)
 ApplySceneOp(op) ==
     LET RemoveFromOriginalParent(n, p) ==
         IF sceneState[p].left_child = n 
