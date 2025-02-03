@@ -1,4 +1,4 @@
------------------------------- MODULE GodotSync -----------------------------
+------------------------------ MODULE GodotSync ------------------------------
 EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, parallelcommits
 
 CONSTANTS
@@ -79,19 +79,21 @@ LeaderAppend(shard, op) ==
 (*-------------------------- Scene Tree Operations -----------------------*)
 ApplySceneOp(op) ==
     LET RemoveFromOriginalParent(n, p) ==
-        CASE
-            sceneState[p].left_child = n ->
+        CASE sceneState[p].left_child = n ->
                 sceneState' = [sceneState EXCEPT ![p].left_child = sceneState[n].right_sibling]
           [] sceneState[p].right_sibling = n ->
                 sceneState' = [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
-        END
+        OTHER -> UNCHANGED sceneState
+    IN
     LET Descendants(n) == 
         LET Children == { sceneState[n].left_child } \cup { m \in DOMAIN sceneState : \E k \in DOMAIN sceneState : m = sceneState[k].right_sibling }
         IN  IF Children = {} THEN {n} ELSE {n} \cup UNION { Descendants(c) : c \in Children } 
+    IN
     LET OrderedChildren(p) ==
         LET Rec(n) == IF n = NULL THEN << >> 
                       ELSE Append(Rec(sceneState[n].right_sibling), n)
         IN Reverse(Rec(sceneState[p].left_child))
+    IN
     LET RebuildSiblingLinks(p, children) ==
         IF children = << >> 
         THEN [sceneState EXCEPT ![p].left_child = NULL]
@@ -132,7 +134,7 @@ ApplySceneOp(op) ==
   [] op.type = "remove_node" ->
       LET node == op.node IN
       LET descendants == Descendants(node) IN
-      /\ sceneState' = [n \in DOMAIN sceneState \ descendants |-> sceneState[n]]
+      /\ sceneState' = [n \in DOMAIN sceneState |-> IF n \in descendants THEN UNDEFINED ELSE sceneState[n]]
       /\ \A parent \in DOMAIN sceneState :
           IF sceneState[parent].left_child \in descendants THEN
               sceneState'[parent].left_child = NULL
@@ -140,7 +142,7 @@ ApplySceneOp(op) ==
               sceneState'[parent].right_sibling = NULL
   [] op.type = "set_property" ->
         sceneState' = [sceneState EXCEPT
-                      ![op.node].properties[op.key] = op.value ]
+                      ![op.node].properties = [op.node].properties @@ (op.key :> op.value) ]
   [] op.type = "move_subtree" ->
         LET originalParent == CHOOSE p \in DOMAIN sceneState : 
                                 sceneState[p].left_child = op.node \/ 
@@ -160,7 +162,7 @@ ApplySceneOp(op) ==
                                                sceneState[op.node].properties[k]]]
   [] op.type = "batch_update" ->
         LET ApplySingleUpdate(s, update) ==
-            [s EXCEPT ![update.node].properties[update.key] = update.value]
+            [s EXCEPT ![update.node].properties = @ @@ (update.key :> update.value)]
         IN
         sceneState' = FoldLeft(ApplySingleUpdate, sceneState, op.updates)
   [] op.type = "batch_structure" ->
