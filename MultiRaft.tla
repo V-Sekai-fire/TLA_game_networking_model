@@ -8,7 +8,7 @@ CONSTANTS Server, Shard, Value, Follower, Candidate, Leader, Nil,
  * This is the formal specification for a Multi-Shard Raft consensus algorithm.
  * Each shard operates as an independent Raft cluster with its own leader election and log replication.
  * 
- * Adapted from the original Raft specification by Diego Ongaro.
+ * Adapted from the original Raft specification by Diego Ongaro. https://github.com/ongardie/raft.tla
  *)
 
 VARIABLES 
