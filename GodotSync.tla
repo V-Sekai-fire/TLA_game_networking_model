@@ -26,7 +26,7 @@ VARIABLES
     crashed           \* Set of crashed nodes
 
 (*--------------------------- Type Definitions ----------------------------*)
-HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
+HLC == <<l[self], c[self]>>  \* Correct HLC tuple without pt
 
 JSON == [key |-> STRING]  \* Simplified JSON representation
 
@@ -305,6 +305,8 @@ RecoverNode(n) ==
     /\ crashed' = crashed \ {n}
 
 (*-------------------------- Parallel Commit Protocol -----------------------*)
+HLC_Diff(h1, h2) == h2.l - h1.l
+
 StartParallelCommit(txn) ==
     LET coordShard == CHOOSE s \in txn.shards : TRUE
         txnEntry == [txn EXCEPT !.status = "COMMITTING", !.coordShard = coordShard]
@@ -323,7 +325,7 @@ CheckParallelCommit(txnId) ==
     IF \A s \in txn.shards : committedInShard(s)
     THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
          /\ ApplyTxnOps(txn.ops)
-    ELSE IF HLC_Diff(pc[self], txn.hlc) > MaxLatency
+    ELSE IF HLC_Diff(<<l[self], c[self]>>, txn.hlc) > MaxLatency  \* Use l from HLC
          THEN AbortTxn(txnId)
          ELSE UNCHANGED <<pendingTxns, shardLogs>>
 
