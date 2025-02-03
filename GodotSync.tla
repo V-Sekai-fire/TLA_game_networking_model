@@ -3,27 +3,23 @@ EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, ParallelCommits
 
 CONSTANTS
     GodotNodes,        \* Initial node tree structure in LCRS form
-    Shards,            \* {s1, s2} for multi-shard transactions  
     MaxLatency,        \* Maximum network delay (ticks)
     NodeID,            \* 1..1000
     SceneOperations,   \* Set of valid scene operations
     NULL               \* Representing null node reference
 
 VARIABLES
-    (* Multi-Raft Consensus *)
-    shardLogs,        \* [ShardID |-> Seq(LogEntry)]
-    shardTerms,       \* [ShardID |-> Nat]
-    shardCommitIndex, \* [ShardID |-> Nat]
-    shardLeaders,     \* [ShardID |-> NodeID]
+    (* Single Raft Consensus *)
+    log,             \* Seq(LogEntry)
+    currentTerm,     \* Current term number
+    commitIndex,    \* Index of highest committed entry
+    currentLeader,  \* Current leader node
     
     (* Godot Scene State *)
-    sceneState,         \* [node |-> [left_child, right_sibling, properties]]
-    pendingTxns,       \* [txnId |-> [status, shards, hlc, ops]]
-    appliedIndex,      \* [NodeID |-> [ShardID |-> Nat]]
-    
-    (* Shard Mapping *)
-    shardMap,         \* [node |-> SUBSET Shards]
-    crashed           \* Set of crashed nodes
+    sceneState,      \* [node |-> [left_child, right_sibling, properties]]
+    pendingTxns,    \* [txnId |-> [status, hlc, ops]]
+    appliedIndex,   \* [NodeID |-> Nat]
+    crashed         \* Set of crashed nodes
 
 (*--------------------------- Type Definitions ----------------------------*)
 HLC(n) == <<l[n], c[n]>>  \* HLC tuple for node n
@@ -31,7 +27,7 @@ HLC(n) == <<l[n], c[n]>>  \* HLC tuple for node n
 JSON == [key |-> STRING]  \* Simplified JSON representation
 
 SceneOp ==
-    [ type |-> {"add_child", "add_sibling", "remove_node", "move_shard",
+    [ type |-> {"add_child", "add_sibling", "remove_node",
                "set_property", "move_subtree", 
                "batch_update", "batch_structure", "move_child"},
       target |-> NodeID,    \* For add_child/add_sibling: target node
@@ -46,35 +42,30 @@ SceneOp ==
       new_parent |-> NodeID,  \* For move_subtree
       new_sibling |-> NodeID, \* For move_subtree
       updates |-> Seq([node |-> NodeID, key |-> STRING, value |-> STRING]),
-      structure_ops |-> Seq(SceneOp),
-      new_shard |-> Shards ]  \* For move_shard
+      structure_ops |-> Seq(SceneOp) ]
 
 TxnState ==
     [ txnId |-> Nat,
       status |-> {"COMMITTING", "COMMITTED", "ABORTED"},
-      shards |-> SUBSET Shards,
-      coordShard |-> Shards,  \* Coordinator shard for parallel commit
       hlc |-> HLC,
       ops |-> Seq(SceneOp) ]
 
 (*-------------------------- Raft-HLC Integration --------------------------*)
-ShardLogEntry == [term |-> Nat, cmd |-> SceneOp \/ TxnState, hlc |-> HLC, shard |-> Shards]
+LogEntry == [term |-> Nat, cmd |-> SceneOp \/ TxnState, hlc |-> HLC]
 
-LeaderAppend(shard, op) ==
-    LET leader == shardLeaders[shard]
-        new_pt == pt[leader] + 1
-        new_l == IF l[leader] >= new_pt THEN l[leader] ELSE new_pt
-        new_c == IF l[leader] >= new_pt THEN c[leader] + 1 ELSE 0
-        entry == [term |-> shardTerms[shard], cmd |-> op, hlc |-> HLC(leader), shard |-> shard]
-    IN  /\ pt' = [pt EXCEPT ![leader] = new_pt]
-        /\ l' = [l EXCEPT ![leader] = new_l]
-        /\ c' = [c EXCEPT ![leader] = new_c]
-        /\ shardLogs' = [shardLogs EXCEPT ![shard] = Append(shardLogs[shard], entry)]
-        /\ SendToShard(shard, entry)
-        /\ UNCHANGED <<shardTerms, shardCommitIndex>>
+LeaderAppend(op) ==
+    LET new_pt == pt[currentLeader] + 1
+        new_l == IF l[currentLeader] >= new_pt THEN l[currentLeader] ELSE new_pt
+        new_c == IF l[currentLeader] >= new_pt THEN c[currentLeader] + 1 ELSE 0
+        entry == [term |-> currentTerm, cmd |-> op, hlc |-> HLC(currentLeader)]
+    IN  /\ pt' = [pt EXCEPT ![currentLeader] = new_pt]
+        /\ l' = [l EXCEPT ![currentLeader] = new_l]
+        /\ c' = [c EXCEPT ![currentLeader] = new_c]
+        /\ log' = Append(log, entry)
+        /\ SendToAll(entry)
+        /\ UNCHANGED <<currentTerm, commitIndex>>
 
 (*-------------------------- Scene Tree Operations -----------------------*)
-
 RECURSIVE OrderedChildrenAux(_, _)
 OrderedChildrenAux(n, acc) ==
     IF n = NULL
@@ -99,26 +90,6 @@ FilterSeq(seq, elem) ==
     ELSE IF Head(seq) = elem 
          THEN FilterSeq(Tail(seq), elem)
          ELSE <<Head(seq)>> \o FilterSeq(Tail(seq), elem)
-
-RECURSIVE RecursiveTransfer(_, _)
-RecursiveTransfer(remaining, acc) ==
-    IF remaining = << >> 
-    THEN acc
-    ELSE LET n == Head(remaining)
-             newEntry == [ type |-> "state_transfer",
-                            node |-> n,
-                            state |-> sceneState[n],
-                            hlc |-> <<pt[n], l[n], c[n]>> ]
-         IN RecursiveTransfer(Tail(remaining), acc \o <<newEntry>>)
-
-RECURSIVE RecursiveRemove(_, _)
-RecursiveRemove(remaining, acc) ==
-    IF remaining = << >> 
-    THEN acc
-    ELSE LET n == Head(remaining)
-             newEntry == [ type |-> "shard_remove",
-                            node |-> n ]
-         IN RecursiveRemove(Tail(remaining), acc \o <<newEntry>>)
 
 RECURSIVE Siblings(_)
 Siblings(n) == 
@@ -160,13 +131,11 @@ ApplySceneOp(op) ==
         LET target == op.target IN
         LET new == op.new_node IN
         IF target = NULL THEN
-            \* Handle root creation
             [sceneState EXCEPT
              ![new] = [ left_child |-> NULL,
                       right_sibling |-> NULL,
                       properties |-> op.properties ]]
         ELSE
-            \* Existing add_child logic for non-NULL parent
             [sceneState EXCEPT
              ![target].left_child = new,
              ![new] = [ left_child |-> NULL,
@@ -233,105 +202,45 @@ ApplySceneOp(op) ==
                 new_order == SubSeq(filtered, 1, adj_idx) \o <<c>> \o SubSeq(filtered, adj_idx+1, Len(filtered))
             IN
             RebuildSiblingLinks(p, new_order)
- 
-   [] op.type = "move_shard" ->
-    LET 
-        OrderedDescendants(node) == ...  \* Your existing definition
-        descendantsSeq == OrderedDescendants(op.node)
-        
-        \* Build sequences recursively
-        transferEntries == RecursiveTransfer(descendantsSeq, << >>)
-        removeEntries == RecursiveRemove(descendantsSeq, << >>)
-    IN
-    LET newEntries == [s \in Shards |-> 
-        IF s = op.new_shard 
-            THEN transferEntries
-        ELSE IF s \in old_shards 
-            THEN removeEntries
-        ELSE << >> ]
-    IN
-    /\ \A shard \in Shards : 
-        IF newEntries[shard] /= << >> THEN
-            /\ LeaderAppend(shard, newEntries[shard])
-            /\ shardMap' = [n \in NodeID |-> 
-                IF n \in descendantsSeq THEN {op.new_shard} ELSE shardMap[n]]
-            /\ IF original_parent /= NULL THEN
-                LET detach_op == [type |-> "detach_child", node |-> original_parent, child |-> op.node]
-                IN \A s \in shardMap[original_parent] :
-                    LeaderAppend(s, detach_op)
-              ELSE
-                UNCHANGED <<shardMap, sceneState>> 
-        ELSE
-            UNCHANGED <<shardMap, sceneState>> 
-    /\ IF op.new_parent /= NULL THEN
-        LeaderAppend(op.new_shard, [type |-> "attach_child", 
-                                  node |-> op.new_parent, 
-                                  child |-> op.node, 
-                                  position |-> op.position])
-      ELSE
-        UNCHANGED <<shardMap, sceneState>>
-    /\ IF op.new_parent = NULL THEN
-        LeaderAppend(op.new_shard, [type |-> "add_child", 
-                                  target |-> NULL, 
-                                  new_node |-> op.node, 
-                                  properties |-> sceneState[op.node].properties])
-      ELSE
-        UNCHANGED <<shardMap, sceneState>>
-        /\ UNCHANGED <<sceneState>>
- 
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
     /\ n \in crashed
-    /\ LET ProcessShard(s) ==
-           LET maxIdx == shardCommitIndex[s] - appliedIndex[n][s] - 1
-               entries == { shardLogs[s][appliedIndex[n][s] + idx + 1] : idx \in 0..maxIdx }
-               stateTransfers == { entry \in entries : entry.cmd.type = "state_transfer" }
-               sceneUpdates == [node \in Nodes |->
-                                  IF \E entry \in stateTransfers : entry.cmd.node = node
-                                  THEN (CHOOSE entry \in stateTransfers : entry.cmd.node = node).cmd.state
-                                  ELSE sceneState[node]]
-               appliedDelta == IF s \in shardMap[n] THEN shardCommitIndex[s] - appliedIndex[n][s] ELSE 0
-           IN <<sceneUpdates, appliedDelta>>
-       IN 
-           /\ sceneState' = [node \in Nodes |->
-                               CHOOSE update \in { ProcessShard(s)[1][node] : s \in shardMap[n] } \cup {sceneState[node]}
-                               : TRUE]
-           /\ appliedIndex' = [appliedIndex EXCEPT ![n] = 
-                                  [s \in Shards |->
-                                      IF s \in shardMap[n]
-                                      THEN appliedIndex[n][s] + ProcessShard(s)[2]
-                                      ELSE appliedIndex[n][s]]]
+    /\ LET maxIdx == commitIndex - appliedIndex[n] - 1
+           entries == { log[appliedIndex[n] + idx + 1] : idx \in 0..maxIdx }
+           stateTransfers == { entry \in entries : entry.cmd.type = "state_transfer" }
+           sceneUpdates == [node \in DOMAIN sceneState |->
+                              IF \E entry \in stateTransfers : entry.cmd.node = node
+                              THEN (CHOOSE entry \in stateTransfers : entry.cmd.node = node).cmd.state
+                              ELSE sceneState[node]]
+       IN
+           /\ sceneState' = sceneUpdates
+           /\ appliedIndex' = [appliedIndex EXCEPT ![n] = appliedIndex[n] + maxIdx + 1]
     /\ crashed' = crashed \ {n}
 
 (*-------------------------- Parallel Commit Protocol -----------------------*)
 HLC_Diff(n, h2) == h2.l - HLC(n).l
 
 StartParallelCommit(txn) ==
-    LET coordShard == CHOOSE s \in txn.shards : TRUE
-        txnEntry == [txn EXCEPT !.status = "COMMITTING", !.coordShard = coordShard]
-    IN
-    /\ pendingTxns' = [pendingTxns EXCEPT ![txn.txnId] = txnEntry]
-    /\ \A s \in txn.shards :
-        LeaderAppend(s, IF s = coordShard THEN txnEntry ELSE [type |-> "COMMIT", txnId |-> txn.txnId, hlc |-> txn.hlc])
+    /\ pendingTxns' = [pendingTxns EXCEPT ![txn.txnId] = [txn EXCEPT !.status = "COMMITTING"]]
+    /\ LeaderAppend(txn)
 
 CheckParallelCommit(txnId) == 
     LET txn == pendingTxns[txnId]
-        committedInShard(s) ==
-            \E idx \in 1..Len(shardLogs[s]) : 
-                /\ shardLogs[s][idx].cmd.txnId = txnId
-                /\ idx <= shardCommitIndex[s]
+        committed == \E idx \in 1..Len(log) : 
+                        /\ log[idx].cmd.txnId = txnId
+                        /\ idx <= commitIndex
     IN
-    IF \A s \in txn.shards : committedInShard(s)
+    IF committed
     THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
          /\ ApplyTxnOps(txn.ops)
-    ELSE IF HLC_Diff(currentNode, txn.hlc) > MaxLatency  \* Assuming currentNode is defined
+    ELSE IF HLC_Diff(currentNode, txn.hlc) > MaxLatency
          THEN AbortTxn(txnId)
-         ELSE UNCHANGED <<pendingTxns, shardLogs>>
+         ELSE UNCHANGED <<pendingTxns, log>>
 
 (*-------------------------- Safety Invariants ----------------------------*)
 IsWrite(op) == op.type = "set_property"
-IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
+IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "move_child"}
 
 Conflict(op1, op2) ==
     \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
@@ -343,9 +252,8 @@ Conflict(op1, op2) ==
     \/ (op1.type = "move_child" /\ op2.type \in {"add_child", "add_sibling"} 
        /\ op1.parent = op2.target)
 
-
 CheckConflicts(txn) ==
-    LET committedOps == UNION { {entry.cmd} : s \in Shards, entry \in shardLogs[s][1..shardCommitIndex[s]] }
+    LET committedOps == { entry.cmd : entry \in log[1..commitIndex] }
     IN
     /\ \A op \in txn.ops:
         \A entry \in committedOps:
@@ -357,22 +265,21 @@ CheckConflicts(txn) ==
             => AbortTxn(txn.txnId)
 
 Linearizability ==
-    \A s1, s2 \in Shards:
-        \A i \in 1..Len(shardLogs[s1]):
-            \A k \in 1..Len(shardLogs[s2]):
-                shardLogs[s1][i].hlc < shardLogs[s2][k].hlc => 
-                    ~\E op1 \in {shardLogs[s1][i].cmd}, op2 \in {shardLogs[s2][k].cmd} : 
-                        Conflict(op1, op2)
+    \A i, j \in 1..Len(log) :
+        i < j /\ log[i].hlc < log[j].hlc => 
+            ~\E op1 \in {log[i].cmd}, op2 \in {log[j].cmd} : 
+                Conflict(op1, op2)
 
 NoOrphanNodes ==
     LET Roots == { n \in DOMAIN sceneState : 
                      \A m \in DOMAIN sceneState : 
-                         n /= sceneState[m].left_child /\ n /= sceneState[m].right_sibling } IN
-    LET R(m, n) == n = sceneState[m].left_child \/ n = sceneState[m].right_sibling IN
+                         n /= sceneState[m].left_child /\ n /= sceneState[m].right_sibling } 
+    IN
     LET Reachable == { n \in DOMAIN sceneState : 
                          \E path \in Seq(DOMAIN sceneState) : 
-                             /\ Head(path) \in Roots 
-                             /\ \A i \in 1..(Len(path)-1) : R(path[i], path[i+1]) } IN
+                             Head(path) \in Roots /\ \A i \in 1..(Len(path)-1) : 
+                                 path[i+1] = sceneState[path[i]].left_child \/ path[i+1] = sceneState[path[i]].right_sibling } 
+    IN
     DOMAIN sceneState \subseteq Reachable
 
 TransactionAtomicity ==
@@ -390,36 +297,32 @@ TransactionAtomicity ==
                     op.new_node \notin DOMAIN sceneState
                   [] OTHER -> TRUE
 
-
 NoDanglingIntents ==
     \A txn \in DOMAIN pendingTxns:
         pendingTxns[txn].status = "COMMITTED" => 
-            \A s \in pendingTxns[txn].shards:
-                \E entry \in shardLogs[s] : 
-                    /\ entry.cmd.txnId = txn
-                    /\ \A otherEntry \in shardLogs[s] : 
-                        (otherEntry.cmd.txnId = txn) => (otherEntry = entry)
+            \E entry \in log : 
+                entry.cmd.txnId = txn /\
+                \A otherEntry \in log : 
+                    (otherEntry.cmd.txnId = txn) => (otherEntry = entry)
 
 NoPartialBatches ==
-    \A entry \in UNION {shardLogs[s] : s \in Shards} :
+    \A entry \in log :
         entry.cmd.type = "batch_update" => 
             \A update \in entry.cmd.updates :
-                \E e \in UNION {shardLogs[s] : s \in Shards} :
-                    e.hlc = entry.hlc /\ e.cmd.node = update.node
-                    /\ \A e2 \in UNION {shardLogs[s] : s \in Shards} :
+                \E e \in log :
+                    e.hlc = entry.hlc /\ e.cmd.node = update.node /\
+                    \A e2 \in log :
                         (e2.hlc = entry.hlc /\ e2.cmd.node = update.node) => e2 = e
 
 PropertyTombstoneConsistency ==  
     \A n \in DOMAIN sceneState :
         \A k \in DOMAIN sceneState[n].properties :
-            \E e \in UNION {shardLogs[s] : s \in Shards} : 
+            \E e \in log : 
                 /\ e.cmd.node = n 
                 /\ e.cmd.key = k 
                 /\ e.cmd.type = "set_property"
-                /\ \A otherE \in UNION {shardLogs[s] : s \in Shards} : 
-                    (otherE.cmd.node = n 
-                     /\ otherE.cmd.key = k 
-                     /\ otherE.cmd.type = "set_property") 
+                /\ \A otherE \in log : 
+                    (otherE.cmd.node = n /\ otherE.cmd.key = k /\ otherE.cmd.type = "set_property") 
                     => (otherE = e)
 
 SiblingOrderConsistency ==
@@ -428,33 +331,15 @@ SiblingOrderConsistency ==
         \A i \in 1..(Len(children)-1):
             sceneState[children[i]].right_sibling = children[i+1]            
 
-ParallelCommitConsistency ==
-    \A txn \in pendingTxns : 
-        txn.status = "COMMITTED" => 
-            \A s \in txn.shards : 
-                \E e \in shardLogs[s] : 
-                    /\ e.cmd.txnId = txn.txnId
-                    /\ \A otherE \in shardLogs[s] : 
-                        (otherE.cmd.txnId = txn.txnId) => (otherE = e)
-                        
-CrossShardAtomicity ==
-    \A t1, t2 \in pendingTxns :
-        (t1 /= t2 
-         /\ t1.status = "COMMITTED" 
-         /\ t2.status = "COMMITTED"
-         /\ \E s \in Shards : s \in t1.shards /\ s \in t2.shards)
-        => \A op1 \in t1.ops, op2 \in t2.ops : ~Conflict(op1, op2)
-
 IsValidLCRSTree(tree) ==
     LET Nodes == DOMAIN tree
         Root == { n \in Nodes : \A m \in Nodes : n /= tree[m].left_child /\ n /= tree[m].right_sibling }
         ParentCount(n) == Cardinality({ m \in Nodes : n = tree[m].left_child \/ n = tree[m].right_sibling })
         AllNodesHaveOneParent == \A n \in Nodes : (n \in Root /\ ParentCount(n) = 0) \/ (ParentCount(n) = 1)
-        RECURSIVE ReachableFrom(_)  \* Declare recursion first
-        ReachableFrom(n) ==         \* Then define the function
-            {n} 
-            \cup (IF tree[n].left_child /= NULL THEN ReachableFrom(tree[n].left_child) ELSE {}) 
-            \cup (IF tree[n].right_sibling /= NULL THEN ReachableFrom(tree[n].right_sibling) ELSE {})
+        RECURSIVE ReachableFrom(_)
+        ReachableFrom(n) == 
+            {n} \cup (IF tree[n].left_child /= NULL THEN ReachableFrom(tree[n].left_child) ELSE {}) 
+                    \cup (IF tree[n].right_sibling /= NULL THEN ReachableFrom(tree[n].right_sibling) ELSE {})
         Reachable == IF Root = {} THEN {} ELSE ReachableFrom(CHOOSE r \in Root : TRUE)
     IN
         /\ Cardinality(Root) = 1
@@ -464,22 +349,10 @@ IsValidLCRSTree(tree) ==
 
 ASSUME 
     /\ Cardinality(NodeID) >= 3
-    /\ Cardinality(Shards) = 2
     /\ MaxLatency = 16
     /\ GodotNodes /= {}
     /\ NodeID \subseteq 1..1000
     /\ IsValidLCRSTree(GodotNodes)
-    /\ (IF Cardinality(NodeID) = 1
-          THEN \A n \in NodeID : shardMap[n] = Shards
-          ELSE /\ \A n \in NodeID : Cardinality(shardMap[n]) = 1
-               /\ \A s \in Shards : 
-                   Cardinality({n \in NodeID : s \in shardMap[n]}) >= 3
-               /\ \A n \in NodeID : 
-                   \E s \in Shards : 
-                     /\ s \in shardMap[n]
-                     /\ \A otherS \in Shards : 
-                         (otherS \in shardMap[n]) => (otherS = s)
-        )
     /\ crashed = {}
 
 =============================================================================
