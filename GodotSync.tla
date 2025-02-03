@@ -224,48 +224,48 @@ ApplySceneOp(op) ==
             RebuildSiblingLinks(p, new_order)
  
    [] op.type = "move_shard" ->
-        LET 
-            OrderedDescendants(node) == ...  \* Your existing definition
-            descendantsSeq == OrderedDescendants(op.node)
-            
-            \* Build sequences recursively
-            transferEntries == RecursiveTransfer(descendantsSeq, << >>)
-            removeEntries == RecursiveRemove(descendantsSeq, << >>)
-        IN
-        LET newEntries == [s \in Shards |-> 
-            IF s = op.new_shard 
-                THEN transferEntries
-            ELSE IF s \in old_shards 
-                THEN removeEntries
-            ELSE << >> ]
-        IN
-        /\ \A s \in Shards : 
-            IF newEntries[s] /= << >> THEN
-                /\ LeaderAppend(s, newEntries[s])
-                /\ shardMap' = [n \in NodeID |-> 
-                    IF n \in descendantsSeq THEN {op.new_shard} ELSE shardMap[n]]
-                /\ IF original_parent /= NULL THEN
-                    LET detach_op == [type |-> "detach_child", node |-> original_parent, child |-> op.node]
-                    IN \A s \in shardMap[original_parent] :
-                        LeaderAppend(s, detach_op)
-                  ELSE
-                    UNCHANGED <<shardMap, sceneState>> 
-            ELSE
+    LET 
+        OrderedDescendants(node) == ...  \* Your existing definition
+        descendantsSeq == OrderedDescendants(op.node)
+        
+        \* Build sequences recursively
+        transferEntries == RecursiveTransfer(descendantsSeq, << >>)
+        removeEntries == RecursiveRemove(descendantsSeq, << >>)
+    IN
+    LET newEntries == [s \in Shards |-> 
+        IF s = op.new_shard 
+            THEN transferEntries
+        ELSE IF s \in old_shards 
+            THEN removeEntries
+        ELSE << >> ]
+    IN
+    /\ \A shard \in Shards : 
+        IF newEntries[shard] /= << >> THEN
+            /\ LeaderAppend(shard, newEntries[shard])
+            /\ shardMap' = [n \in NodeID |-> 
+                IF n \in descendantsSeq THEN {op.new_shard} ELSE shardMap[n]]
+            /\ IF original_parent /= NULL THEN
+                LET detach_op == [type |-> "detach_child", node |-> original_parent, child |-> op.node]
+                IN \A s \in shardMap[original_parent] :
+                    LeaderAppend(s, detach_op)
+              ELSE
                 UNCHANGED <<shardMap, sceneState>> 
-        /\ IF op.new_parent /= NULL THEN
-            LeaderAppend(op.new_shard, [type |-> "attach_child", 
-                                      node |-> op.new_parent, 
-                                      child |-> op.node, 
-                                      position |-> op.position])
-          ELSE
-            UNCHANGED <<shardMap, sceneState>>
-        /\ IF op.new_parent = NULL THEN
-            LeaderAppend(op.new_shard, [type |-> "add_child", 
-                                      target |-> NULL, 
-                                      new_node |-> op.node, 
-                                      properties |-> sceneState[op.node].properties])
-          ELSE
-            UNCHANGED <<shardMap, sceneState>>
+        ELSE
+            UNCHANGED <<shardMap, sceneState>> 
+    /\ IF op.new_parent /= NULL THEN
+        LeaderAppend(op.new_shard, [type |-> "attach_child", 
+                                  node |-> op.new_parent, 
+                                  child |-> op.node, 
+                                  position |-> op.position])
+      ELSE
+        UNCHANGED <<shardMap, sceneState>>
+    /\ IF op.new_parent = NULL THEN
+        LeaderAppend(op.new_shard, [type |-> "add_child", 
+                                  target |-> NULL, 
+                                  new_node |-> op.node, 
+                                  properties |-> sceneState[op.node].properties])
+      ELSE
+        UNCHANGED <<shardMap, sceneState>>
         /\ UNCHANGED <<sceneState>>
  
 
