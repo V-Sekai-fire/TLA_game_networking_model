@@ -1,0 +1,187 @@
+diff --git a/MultiRaft.tla b/MultiRaft.tla
+--- a/MultiRaft.tla
++++ b/MultiRaft.tla
+@@ -3,21 +3,36 @@
+ 
+ CONSTANTS Server, Shard, Value, Follower, Candidate, Leader, Nil, 
+           RequestVoteRequest, RequestVoteResponse, AppendEntriesRequest, AppendEntriesResponse
++          
++(*
++ * This is the formal specification for a Multi-Shard Raft consensus algorithm.
++ * Each shard operates as an independent Raft cluster with its own leader election and log replication.
++ * 
++ * Adapted from the original Raft specification by Diego Ongaro.
++ *)
+ 
+ VARIABLES 
+     \* Per-shard variables
+-    shardCurrentTerm,  \* [Shard -> [Server -> Term]]
+-    shardState,        \* [Shard -> [Server -> {Follower, Candidate, Leader}]]
+-    shardVotedFor,     \* [Shard -> [Server -> Server | Nil]]
+-    shardLogs,         \* [Shard -> [Server -> Seq(Entry)]]
+-    shardCommitIndex,  \* [Shard -> [Server -> Index]]
+-    shardNextIndex,    \* [Shard -> [Server -> [Server -> Index]]]
+-    shardMatchIndex,   \* [Shard -> [Server -> [Server -> Index]]]
+-    shardVotesResponded, \* [Shard -> [Server -> SUBSET Server]]
+-    shardVotesGranted, \* [Shard -> [Server -> SUBSET Server]]
++    shardCurrentTerm,  \* For each shard, the current term of each server (function: Shard → [Server → Term])
++    shardState,        \* For each shard, the state of each server (Follower, Candidate, Leader)
++    shardVotedFor,     \* For each shard, the candidate a server voted for in its current term, or Nil
++    shardLogs,         \* For each shard, the log entries on each server (sequence of entries)
++    shardCommitIndex,  \* For each shard, the index of the highest committed log entry on each server
++    shardNextIndex,    \* For each shard, a leader's next index for each follower (function: Shard → Server → [Server → Index])
++    shardMatchIndex,   \* For each shard, a leader's match index for each follower (highest known replicated index)
++    shardVotesResponded, \* For each shard, set of servers that responded to a candidate's vote requests
++    shardVotesGranted, \* For each shard, set of servers that granted a candidate their vote
+     
+     \* Global variables
+-    messages,          \* Bag of messages across all shards
+-    elections,         \* History of elections per shard
+-    allLogs,          \* All logs across shards
+-    shardMap          \* [Server -> SUBSET Shard] (Shards each server is part of)
++    messages,          \* Bag of in-flight messages across all shards (messages include shard identifier)
++    elections,         \* History of successful elections per shard, tracking leaders and their terms
++    allLogs,          \* Union of all logs across all shards and servers (used for proof purposes)
++    shardMap          \* Assignment of servers to shards (each server participates in a subset of shards)
++
++(* 
++ * A quorum for a shard is a majority of servers in that shard's configuration.
++ * This ensures that any two quorums for the same shard have overlapping servers.
++ *)
++Quorum(shard) == 
++    LET Nodes == {s \in Server : shard \in shardMap[s]} 
++    IN {q \in SUBSET Nodes : Cardinality(q) * 2 > Cardinality(Nodes)}
+ 
+-Quorum(shard) == 
+-    LET Nodes == {s \in Server : shard \in shardMap[s]} 
+-    IN {q \in SUBSET Nodes : Cardinality(q) * 2 > Cardinality(Nodes)}
++(*
++ * Helper functions to manipulate the message bag.
++ * WithMessage adds a message, WithoutMessage removes one.
++ * These operate globally across all shards.
++ *)
++WithMessage(m, msgs) == 
++    IF m \in DOMAIN msgs THEN [msgs EXCEPT ![m] = @ + 1] ELSE msgs @@ (m :> 1)
+ 
+-WithMessage(m, msgs) == 
+-    IF m \in DOMAIN msgs THEN [msgs EXCEPT ![m] = @ + 1] ELSE msgs @@ (m :> 1)
+-
+ WithoutMessage(m, msgs) == 
+     IF m \in DOMAIN msgs THEN 
+         IF msgs[m] <= 1 THEN [x \in DOMAIN msgs \ {m} |-> msgs[x]] 
+@@ -26,8 +41,15 @@
+     ELSE msgs
+ 
+ Send(m) == messages' = WithMessage(m, messages)
++(* Remove a message from the bag after processing *)
+ Discard(m) == messages' = WithoutMessage(m, messages)
++(* Send a response and remove the corresponding request *)
+ Reply(response, request) == messages' = WithoutMessage(request, WithMessage(response, messages))
+ 
++(*
++ * The term of the last entry in a server's log for a specific shard.
++ * Returns 0 if the log is empty.
++ *)
+ LastTerm(shard, s) == 
+     IF Len(shardLogs[shard][s]) = 0 THEN 0 ELSE shardLogs[shard][s][Len(shardLogs[shard][s])].term
+ 
++(* Initial state: all shards start with servers as followers, empty logs, and no votes *)
+ Init == 
+     /\ messages = [m \in {} |-> 0]
+@@ -44,6 +66,7 @@
+     /\ shardVotesGranted = [sh \in Shard |-> [s \in Server |-> {}]]
+     /\ shardMap = [s \in Server |-> {}]
+ 
++(* Server s restarts in a shard, resetting transient state but preserving log and term *)
+ Restart(s, shard) ==
+     /\ shardState' = [shardState EXCEPT ![shard][s] = Follower]
+     /\ shardVotesResponded' = [shardVotesResponded EXCEPT ![shard][s] = {}]
+@@ -52,6 +75,7 @@
+     /\ shardMatchIndex' = [shardMatchIndex EXCEPT ![shard][s] = [d \in Server |-> 0]]
+     /\ shardCommitIndex' = [shardCommitIndex EXCEPT ![shard][s] = 0]
+     /\ UNCHANGED <<messages, shardCurrentTerm, shardVotedFor, shardLogs>>
+ 
++(* Server s times out in a shard, starting a new election by becoming candidate *)
+ Timeout(s, shard) == 
+     /\ shard \in shardMap[s]
+     /\ shardState[shard][s] \in {Follower, Candidate}
+@@ -62,6 +86,7 @@
+     /\ shardVotesGranted' = [shardVotesGranted EXCEPT ![shard][s] = {}]
+     /\ UNCHANGED <<messages, shardLogs, shardCommitIndex>>
+ 
++(* Candidate s in shard sends a vote request to destination server dest *)
+ RequestVote(s, shard, dest) ==
+     /\ shard \in shardMap[s]
+     /\ shardState[shard][s] = Candidate
+@@ -72,6 +97,7 @@
+              msource |-> s, mdest |-> dest])
+     /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
+ 
++(* Candidate s in shard becomes leader upon receiving a quorum of votes *)
+ BecomeLeader(s, shard) ==
+     /\ shardState[shard][s] = Candidate
+     /\ shardVotesGranted[shard][s] \in Quorum(shard)
+@@ -82,6 +108,7 @@
+     /\ elections' = elections \cup {[shard |-> shard, leader |-> s, term |-> shardCurrentTerm[shard][s]]}
+     /\ UNCHANGED <<messages, shardCurrentTerm, shardVotedFor, shardLogs>>
+ 
++(* Leader s in shard sends log entries to destination server dest *)
+ AppendEntries(s, shard, dest) ==
+     /\ s /= dest
+     /\ shardState[shard][s] = Leader
+@@ -97,6 +124,7 @@
+                 msource |-> s, mdest |-> dest])
+     /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
+ 
++(* Server s in shard processes a vote request from m.msource *)
+ HandleRequestVoteRequest(s, shard, m) ==
+     LET logOk == \/ m.mlastLogTerm > LastTerm(shard, s)
+                 \/ /\ m.mlastLogTerm = LastTerm(shard, s)
+@@ -111,6 +139,7 @@
+        /\ Reply([mtype |-> RequestVoteResponse, shard |-> shard, mterm |-> shardCurrentTerm[shard][s],
+                  mvoteGranted |-> grant, msource |-> s, mdest |-> m.msource], m)
+        /\ UNCHANGED <<shardState, shardCurrentTerm, shardLogs>>
+ 
++(* Server s in shard processes a vote response from m.msource *)
+ HandleRequestVoteResponse(s, shard, m) ==
+     /\ m.mterm = shardCurrentTerm[shard][s]
+     /\ shardVotesResponded' = [shardVotesResponded EXCEPT ![shard][s] = @ \cup {m.msource}]
+@@ -120,6 +149,7 @@
+     /\ Discard(m)
+     /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
+ 
++(* Server s in shard processes an append entries request from m.msource *)
+ HandleAppendEntriesRequest(s, shard, m) ==
+     LET logOk == \/ m.mprevLogIndex = 0
+                 \/ /\ m.mprevLogIndex <= Len(shardLogs[shard][s])
+@@ -143,6 +173,7 @@
+              /\ UNCHANGED <<shardLogs>>
+     /\ UNCHANGED <<shardCurrentTerm, shardVotedFor>>
+ 
++(* Leader s in shard advances the commit index based on quorum agreement *)
+ AdvanceCommitIndex(s, shard) ==
+     /\ shardState[shard][s] = Leader
+     /\ LET agreeIndexes == {index \in 1..Len(shardLogs[shard][s]) : 
+@@ -155,6 +186,7 @@
+        IN shardCommitIndex' = [shardCommitIndex EXCEPT ![shard][s] = newCommit]
+     /\ UNCHANGED <<messages, shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
+ 
++(* Server s processes an incoming message m for a specific shard *)
+ Receive(m) ==
+     LET s == m.mdest
+         shard == m.shard
+@@ -172,6 +204,7 @@
+        \/ /\ m.mtype = AppendEntriesResponse
+           /\ HandleAppendEntriesResponse(s, shard, m)
+ 
++(* The next-state relation covering all possible transitions *)
+ Next == 
+     \/ \E s \in Server, shard \in Shard : Restart(s, shard)
+     \/ \E s \in Server, shard \in Shard : Timeout(s, shard)
+@@ -183,4 +216,5 @@
+     \/ \E s \in Server, shard \in Shard : AdvanceCommitIndex(s, shard)
+     /\ allLogs' = allLogs \cup {shardLogs[shard][s] : s \in Server, shard \in Shard}
+ 
++(* The complete system specification *)
+ Spec == Init /\ [][Next]_<<messages, shardCurrentTerm, shardState, shardVotedFor, shardLogs, shardCommitIndex, shardNextIndex, shardMatchIndex, shardVotesResponded, shardVotesGranted, elections, allLogs, shardMap>>
+ 
