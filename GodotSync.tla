@@ -314,7 +314,7 @@ CheckParallelCommit(txnId) ==
          THEN AbortTxn(txnId)
          ELSE UNCHANGED <<pendingTxns, shardLogs>>
 
-(*---------------------- Transaction Handling -----------------------*)
+(*-------------------------- Safety Invariants ----------------------------*)
 CheckConflicts(txn) ==
     LET committedOps == UNION { {entry.cmd} : s \in Shards, entry \in shardLogs[s][1..shardCommitIndex[s]] }
     IN
@@ -327,6 +327,9 @@ CheckConflicts(txn) ==
                 Conflict(op, entry) /\ entry.hlc < txn.hlc
             => AbortTxn(txn.txnId)
 
+IsWrite(op) == op.type = "set_property"
+IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
+
 Conflict(op1, op2) ==
     \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
        /\ (op1.key = op2.key \/ op1.type \notin {"set_property"}))
@@ -337,10 +340,6 @@ Conflict(op1, op2) ==
     \/ (op1.type = "move_child" /\ op2.type \in {"add_child", "add_sibling"} 
        /\ op1.parent = op2.target)
 
-IsWrite(op) == op.type = "set_property"
-IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
-
-(*-------------------------- Safety Invariants ----------------------------*)
 Linearizability ==
     \A s1, s2 \in Shards:
         \A i \in 1..Len(shardLogs[s1]):
