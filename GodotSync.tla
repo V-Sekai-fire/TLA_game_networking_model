@@ -1,5 +1,5 @@
 ------------------------------ MODULE GodotSync ------------------------------
-EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, parallelcommits
+EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, ParallelCommits
 
 CONSTANTS
     GodotNodes,        \* Initial node tree structure in LCRS form
@@ -8,6 +8,26 @@ CONSTANTS
     NodeID,            \* 1..1000
     SceneOperations,   \* Set of valid scene operations
     NULL               \* Representing null node reference
+
+ASSUME 
+    /\ Cardinality(NodeID) >= 3
+    /\ Cardinality(Shards) = 2
+    /\ MaxLatency = 16
+    /\ GodotNodes /= {}
+    /\ NodeID \subseteq 1..1000
+    /\ IsValidLCRSTree(GodotNodes)
+    /\ (IF Cardinality(NodeID) = 1
+          THEN \A n \in NodeID : shardMap[n] = Shards
+          ELSE /\ \A n \in NodeID : Cardinality(shardMap[n]) = 1
+               /\ \A s \in Shards : 
+                   Cardinality({n \in NodeID : s \in shardMap[n]}) >= 3
+               /\ \A n \in NodeID : 
+                   \E s \in Shards : 
+                     /\ s \in shardMap[n]
+                     /\ \A otherS \in Shards : 
+                         (otherS \in shardMap[n]) => (otherS = s)
+        )
+    /\ crashed = {}
 
 VARIABLES
     (* Multi-Raft Consensus *)
@@ -331,6 +351,11 @@ IsWrite(op) == op.type = "set_property"
 IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
+Conflict(op1, op2) == 
+    /\ op1.node = op2.node
+    /\ op1.key = op2.key
+    /\ (op1.type = "write" \/ op2.type = "write")
+
 Linearizability ==
     \A s1, s2 \in Shards:
         \A i \in 1..Len(shardLogs[s1]):
@@ -411,35 +436,13 @@ ParallelCommitConsistency ==
                     /\ e.cmd.txnId = txn.txnId
                     /\ \A otherE \in shardLogs[s] : 
                         (otherE.cmd.txnId = txn.txnId) => (otherE = e)
-
+                        
 CrossShardAtomicity ==
     \A t1, t2 \in pendingTxns :
-        t1 /= t2 /\ t1.status /= "ABORTED" /\ t2.status /= "ABORTED"
-        /\ \E s \in t1.shards \cap t2.shards
-        => ~\E op1 \in t1.ops, op2 \in t2.ops : Conflict(op1, op2)
-    /\ \A t1, t2 \in pendingTxns:
-        t1 /= t2 /\ \E node: shardMap[node] \in t1.shards \cap t2.shards
-        => ~\E op1 \in t1.ops, op2 \in t2.ops: Conflict(op1, op2)
-
-(*-------------------------- Configuration ---------------------------------*)
-ASSUME 
-    /\ Cardinality(NodeID) >= 3
-    /\ Cardinality(Shards) = 2
-    /\ MaxLatency = 16
-    /\ GodotNodes /= {}
-    /\ NodeID \subseteq 1..1000
-    /\ IsValidLCRSTree(GodotNodes)
-    /\ (IF Cardinality(NodeID) = 1
-          THEN \A n \in NodeID : shardMap[n] = Shards
-          ELSE /\ \A n \in NodeID : Cardinality(shardMap[n]) = 1
-               /\ \A s \in Shards : 
-                   Cardinality({n \in NodeID : s \in shardMap[n]}) >= 3
-               /\ \A n \in NodeID : 
-                   \E s \in Shards : 
-                     /\ s \in shardMap[n]
-                     /\ \A otherS \in Shards : 
-                         (otherS \in shardMap[n]) => (otherS = s)
-        )
-    /\ crashed = {}
+        (t1 /= t2 
+         /\ t1.status = "COMMITTED" 
+         /\ t2.status = "COMMITTED"
+         /\ \E s \in Shards : s \in t1.shards /\ s \in t2.shards)
+        => \A op1 \in t1.ops, op2 \in t2.ops : ~Conflict(op1, op2)
 
 =============================================================================
