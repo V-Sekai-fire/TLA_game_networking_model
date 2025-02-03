@@ -1,3 +1,8 @@
+(*
+ * Murat Demirbas <muratdemirbas@gmail.com> https://github.com/muratdem/HLC.git
+ * SPDX-License-Identifier: MIT 
+ *)
+
 \* Hi-lock: (("\\\\\\*.+$" (0 (quote org-level-3) t)))
 \* Hi-lock: (("^.*\\(?:==\\).*$" (0 (quote org-level-1) t)))
 -------------------- MODULE vc -------------------

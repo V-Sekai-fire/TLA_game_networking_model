@@ -1,4 +1,9 @@
 -------------------- MODULE hlc -------------------
+(*
+ * Murat Demirbas <muratdemirbas@gmail.com> https://github.com/muratdem/HLC.git
+ * SPDX-License-Identifier: MIT 
+ *)
+
 EXTENDS Integers
 CONSTANT N, STOP, EPS
 ASSUME N \in Nat \ {0,1}
