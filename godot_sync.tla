@@ -64,10 +64,16 @@ JSON == [key |-> STRING]  \* Simplified JSON representation
 ShardLogEntry == [term: Nat, cmd: SceneOp \/ TxnState, hlc: HLC, shard: Shards]
 
 LeaderAppend(shard, op) ==
-    LET entry == [term |-> shardTerms[shard], cmd |-> op, hlc |-> HLC, shard |-> shard]
-    IN  /\ shardLogs' = [shardLogs EXCEPT ![shard] = Append(shardLogs[shard], entry)]
+    LET leader == shardLeaders[shard]
+        new_pt == pt[leader] + 1
+        new_l == IF l[leader] >= new_pt THEN l[leader] ELSE new_pt
+        new_c == IF l[leader] >= new_pt THEN c[leader] + 1 ELSE 0
+        entry == [term |-> shardTerms[shard], cmd |-> op, hlc |-> <<new_pt, new_l, new_c>>, shard |-> shard]
+    IN  /\ pt' = [pt EXCEPT ![leader] = new_pt]
+        /\ l' = [l EXCEPT ![leader] = new_l]
+        /\ c' = [c EXCEPT ![leader] = new_c]
+        /\ shardLogs' = [shardLogs EXCEPT ![shard] = Append(shardLogs[shard], entry)]
         /\ SendToShard(shard, entry)
-        /\ AdvanceHLC()
         /\ UNCHANGED <<shardTerms, shardCommitIndex>>
 
 (*-------------------------- Scene Tree Operations -----------------------*)
