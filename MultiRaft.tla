@@ -119,7 +119,8 @@ BecomeLeader(s, shard) ==
     /\ shardState' = [shardState EXCEPT ![shard][s] = Leader]
     /\ shardNextIndex' = [shardNextIndex EXCEPT ![shard][s] = [d \in Server |-> Len(shardLogs[shard][s]) + 1]]
     /\ shardMatchIndex' = [shardMatchIndex EXCEPT ![shard][s] = [d \in Server |-> 0]]
-    /\ elections' = elections \cup {[shard |-> shard, leader |-> s, term |-> shardCurrentTerm[shard][s]]}
+    /\ elections' = elections \cup {[shard |-> shard, leader |-> s, term |-> shardCurrentTerm[shard][s], 
+                                      voterLogs |-> [voter \in shardVotesGranted[shard][s] |-> shardLogs[shard][voter]]]}
     /\ UNCHANGED <<messages, shardCurrentTerm, shardVotedFor, shardLogs>>
 
 (* Leader s in shard sends log entries to destination server dest *)
@@ -155,11 +156,14 @@ HandleRequestVoteRequest(s, shard, m) ==
 
 (* Server s in shard processes a vote response from m.msource *)
 HandleRequestVoteResponse(s, shard, m) ==
-    /\ m.mterm = shardCurrentTerm[shard][s]
-    /\ shardVotesResponded' = [shardVotesResponded EXCEPT ![shard][s] = @ \cup {m.msource}]
-    /\ \/ m.mvoteGranted /\ shardVotesGranted' = [shardVotesGranted EXCEPT ![shard][s] = @ \cup {m.msource}]
-       \/ ~m.mvoteGranted /\ UNCHANGED shardVotesGranted
-    /\ Discard(m)
+    /\ IF m.mterm < shardCurrentTerm[shard][s] THEN
+           Discard(m) /\ UNCHANGED <<shardVotesResponded, shardVotesGranted>>
+       ELSE
+           /\ m.mterm = shardCurrentTerm[shard][s]
+           /\ shardVotesResponded' = [shardVotesResponded EXCEPT ![shard][s] = @ \cup {m.msource}]
+           /\ \/ m.mvoteGranted /\ shardVotesGranted' = [shardVotesGranted EXCEPT ![shard][s] = @ \cup {m.msource}]
+              \/ ~m.mvoteGranted /\ UNCHANGED shardVotesGranted
+           /\ Discard(m)
     /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
 
 (* Server s in shard processes an append entries request from m.msource *)
@@ -167,6 +171,7 @@ HandleAppendEntriesRequest(s, shard, m) ==
     LET logOk == \/ m.mprevLogIndex = 0
                 \/ /\ m.mprevLogIndex <= Len(shardLogs[shard][s])
                    /\ m.mprevLogTerm = shardLogs[shard][s][m.mprevLogIndex].term
+        entries == m.mentries
     IN /\ m.mterm <= shardCurrentTerm[shard][s]
        /\ \/ /\ (m.mterm < shardCurrentTerm[shard][s] \/ ~logOk)
              /\ Reply([mtype |-> AppendEntriesResponse, shard |-> shard, mterm |-> shardCurrentTerm[shard][s],
@@ -177,10 +182,19 @@ HandleAppendEntriesRequest(s, shard, m) ==
              /\ UNCHANGED <<shardCurrentTerm, shardVotedFor, shardLogs>>
           \/ /\ logOk
              /\ shardCommitIndex' = [shardCommitIndex EXCEPT ![shard][s] = m.mcommitIndex]
+             /\ \* Append new entries and truncate conflicting ones
+                LET index == m.mprevLogIndex + 1
+                    logLength == Len(shardLogs[shard][s])
+                IN IF logLength >= index /\ logLength > 0 /\ index <= logLength /\ 
+                      shardLogs[shard][s][index].term /= entries[1].term THEN
+                       shardLogs' = [shardLogs EXCEPT ![shard][s] = 
+                                       SubSeq(shardLogs[shard][s], 1, m.mprevLogIndex) \o entries]
+                   ELSE 
+                       shardLogs' = [shardLogs EXCEPT ![shard][s] = 
+                                       IF Len(entries) > 0 THEN @ \o entries ELSE @]
              /\ Reply([mtype |-> AppendEntriesResponse, shard |-> shard, mterm |-> shardCurrentTerm[shard][s],
-                       msuccess |-> TRUE, mmatchIndex |-> m.mprevLogIndex + Len(m.mentries),
+                       msuccess |-> TRUE, mmatchIndex |-> m.mprevLogIndex + Len(entries),
                        msource |-> s, mdest |-> m.msource], m)
-             /\ UNCHANGED <<shardLogs>>
     /\ UNCHANGED <<shardCurrentTerm, shardVotedFor>>
 
 (* Leader s in shard advances the commit index based on quorum agreement *)
@@ -195,6 +209,21 @@ AdvanceCommitIndex(s, shard) ==
                        ELSE shardCommitIndex[shard][s]
        IN shardCommitIndex' = [shardCommitIndex EXCEPT ![shard][s] = newCommit]
     /\ UNCHANGED <<messages, shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
+
+(* Add AssignServerToShard action to modify shardMap *)
+AssignServerToShard(s, shard) ==
+    /\ shardMap' = [shardMap EXCEPT ![s] = @ \cup {shard}]
+    /\ UNCHANGED <<messages, shardCurrentTerm, shardState, shardVotedFor, shardLogs, shardCommitIndex, 
+                    shardNextIndex, shardMatchIndex, shardVotesResponded, shardVotesGranted, elections, allLogs>>
+
+(* ClientRequest action for leaders to append entries *)
+ClientRequest(s, shard, v) ==
+    /\ shardState[shard][s] = Leader
+    /\ shard \in shardMap[s]
+    /\ LET entry == [term |-> shardCurrentTerm[shard][s], value |-> v]
+           newLog == Append(shardLogs[shard][s], entry)
+       IN shardLogs' = [shardLogs EXCEPT ![shard][s] = newLog]
+    /\ UNCHANGED <<messages, shardCurrentTerm, shardState, shardVotedFor>>
 
 (* Server s processes an incoming message m for a specific shard *)
 Receive(m) ==
@@ -223,6 +252,8 @@ Next ==
     \/ \E s, dest \in Server, shard \in Shard : AppendEntries(s, shard, dest)
     \/ \E m \in DOMAIN messages : Receive(m)
     \/ \E s \in Server, shard \in Shard : AdvanceCommitIndex(s, shard)
+    \/ \E s \in Server, shard \in Shard, v \in Value : ClientRequest(s, shard, v)
+    \/ \E s \in Server, shard \in Shard : AssignServerToShard(s, shard)
     /\ allLogs' = allLogs \cup {shardLogs[shard][s] : s \in Server, shard \in Shard}
 
 (* The complete system specification *)
