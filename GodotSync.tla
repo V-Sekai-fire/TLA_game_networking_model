@@ -87,6 +87,12 @@ OrderedChildren(p) ==
         THEN << >>
         ELSE OrderedChildrenAux(first_child, <<first_child>>)
 
+Fold(f(_,_), acc, seq) ==
+  LET F[i \in 0..Len(seq)] ==
+    IF i = 0 THEN acc
+    ELSE f(F[i-1], seq[i])
+  IN F[Len(seq)]
+
 RECURSIVE FilterSeq(_, _)
 FilterSeq(seq, elem) ==
     IF seq = << >> THEN << >>
