@@ -86,11 +86,11 @@ ApplySceneOp(op) ==
              ELSE sceneState
     IN
     LET Children(n) == 
-        LET first = sceneState[n].left_child
+        LET first == sceneState[n].left_child
         IN  IF first = NULL THEN {} 
             ELSE {first} \cup Siblings(first)
     Siblings(n) == 
-        LET sib = sceneState[n].right_sibling
+        LET sib == sceneState[n].right_sibling
         IN  IF sib = NULL THEN {} ELSE {sib} \cup Siblings(sib)
     Descendants(n) == 
         {n} \cup UNION { Descendants(c) : c \in Children(n) }
