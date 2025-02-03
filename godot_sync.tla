@@ -52,7 +52,7 @@ SceneOp ==
 
 TxnState ==
     [ txnId: Nat,
-      status: {"PREPARED", "COMMITTING", "COMMITTED", "ABORTED"},
+      status: {"COMMITTING", "COMMITTED", "ABORTED"},
       shards: SUBSET Shards,
       coordShard: Shards,  \* Coordinator shard for parallel commit
       hlc: HLC,
