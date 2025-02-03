@@ -101,17 +101,20 @@ AppendEntries(s, shard, dest) ==
     /\ LET localPrevLogIndex == shardNextIndex[shard][s][dest] - 1
            prevLogTerm == IF localPrevLogIndex > 0 THEN shardLogs[shard][s][localPrevLogIndex].term ELSE 0
            entries == IF localPrevLogIndex + 1 <= Len(shardLogs[shard][s]) THEN <<shardLogs[shard][s][localPrevLogIndex + 1]>> ELSE <<>>
+           commitIndex == IF shardCommitIndex[shard][s] <= localPrevLogIndex + Len(entries)
+                             THEN shardCommitIndex[shard][s]
+                             ELSE localPrevLogIndex + Len(entries)
        IN Send([mtype |-> AppendEntriesRequest, shard |-> shard, mterm |-> shardCurrentTerm[shard][s],
                 mprevLogIndex |-> localPrevLogIndex, mprevLogTerm |-> prevLogTerm, mentries |-> entries,
-                mcommitIndex |-> Min({shardCommitIndex[shard][s], localPrevLogIndex + Len(entries)}),
+                mcommitIndex |-> commitIndex,
                 msource |-> s, mdest |-> dest])
     /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
 
 HandleRequestVoteRequest(s, shard, m) ==
-    LET logOk = \/ m.mlastLogTerm > LastTerm(shard, s)
+    LET logOk == \/ m.mlastLogTerm > LastTerm(shard, s)
                 \/ /\ m.mlastLogTerm = LastTerm(shard, s)
                    /\ m.mlastLogIndex >= Len(shardLogs[shard][s])
-        grant = /\ m.mterm = shardCurrentTerm[shard][s]
+        grant == /\ m.mterm = shardCurrentTerm[shard][s]
                 /\ logOk
                 /\ shardVotedFor[shard][s] \in {Nil, m.msource}
     IN /\ m.mterm <= shardCurrentTerm[shard][s]
@@ -124,13 +127,13 @@ HandleRequestVoteRequest(s, shard, m) ==
 HandleRequestVoteResponse(s, shard, m) ==
     /\ m.mterm = shardCurrentTerm[shard][s]
     /\ shardVotesResponded' = [shardVotesResponded EXCEPT ![shard][s] = @ \cup {m.msource}]
-    /\ \/ m.mvoteGranted /\ shardVotesGranted' = [shardVotesGranted EXCEPT ![shard][s] = @ \cup {m.msource}
+    /\ \/ m.mvoteGranted /\ shardVotesGranted' = [shardVotesGranted EXCEPT ![shard][s] = @ \cup {m.msource}]
        \/ ~m.mvoteGranted /\ UNCHANGED shardVotesGranted
     /\ Discard(m)
     /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
 
 HandleAppendEntriesRequest(s, shard, m) ==
-    LET logOk = \/ m.mprevLogIndex = 0
+    LET logOk == \/ m.mprevLogIndex = 0
                 \/ /\ m.mprevLogIndex <= Len(shardLogs[shard][s])
                    /\ m.mprevLogTerm = shardLogs[shard][s][m.mprevLogIndex].term
     IN /\ m.mterm <= shardCurrentTerm[shard][s]
@@ -151,16 +154,19 @@ HandleAppendEntriesRequest(s, shard, m) ==
 
 AdvanceCommitIndex(s, shard) ==
     /\ shardState[shard][s] = Leader
-    /\ LET agreeIndexes = {index \in 1..Len(shardLogs[shard][s]) : 
-                           {s} \cup {k \in Server | shardMatchIndex[shard][s][k] >= index} \in Quorum(shard)}
-           newCommit = IF agreeIndexes /= {} /\ shardLogs[shard][s][Max(agreeIndexes)].term = shardCurrentTerm[shard][s]
-                       THEN Max(agreeIndexes) ELSE shardCommitIndex[shard][s]
+    /\ LET agreeIndexes == {index \in 1..Len(shardLogs[shard][s]) : 
+                           {s} \cup {k \in Server : shardMatchIndex[shard][s][k] >= index} \in Quorum(shard)}
+           newCommit == IF agreeIndexes /= {} 
+                           /\ shardLogs[shard][s][CHOOSE x \in agreeIndexes : \A y \in agreeIndexes : y <= x].term 
+                              = shardCurrentTerm[shard][s]
+                       THEN CHOOSE x \in agreeIndexes : \A y \in agreeIndexes : y <= x
+                       ELSE shardCommitIndex[shard][s]
        IN shardCommitIndex' = [shardCommitIndex EXCEPT ![shard][s] = newCommit]
     /\ UNCHANGED <<messages, shardCurrentTerm, shardState, shardVotedFor, shardLogs>>
 
 Receive(m) ==
-    LET s = m.mdest
-        shard = m.shard
+    LET s == m.mdest
+        shard == m.shard
     IN \/ /\ m.mterm > shardCurrentTerm[shard][s]
           /\ shardCurrentTerm' = [shardCurrentTerm EXCEPT ![shard][s] = m.mterm]
           /\ shardState' = [shardState EXCEPT ![shard][s] = Follower]
