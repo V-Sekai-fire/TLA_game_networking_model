@@ -28,6 +28,8 @@ VARIABLES
 (*--------------------------- Type Definitions ----------------------------*)
 HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
+JSON == [key |-> STRING]  \* Simplified JSON representation
+
 SceneOp ==
     [ type |-> {"add_child", "add_sibling", "remove_node", "move_shard",
                "set_property", "move_subtree", 
@@ -315,6 +317,17 @@ CheckParallelCommit(txnId) ==
          ELSE UNCHANGED <<pendingTxns, shardLogs>>
 
 (*-------------------------- Safety Invariants ----------------------------*)
+Conflict(op1, op2) ==
+    \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
+       /\ (op1.key = op2.key \/ op1.type \notin {"set_property"}))
+    \/ (IsTreeMod(op1) /\ (op2.node \in Descendants(op1.node) \/ op1.node \in Descendants(op2.node)))
+    \/ (IsTreeMod(op2) /\ (op1.node \in Descendants(op2.node) \/ op2.node \in Descendants(op1.node)))
+    \/ (op1.type = "move_child" /\ op2.type = "move_child" 
+       /\ op1.parent = op2.parent /\ op1.child_node = op2.child_node)
+    \/ (op1.type = "move_child" /\ op2.type \in {"add_child", "add_sibling"} 
+       /\ op1.parent = op2.target)
+
+
 CheckConflicts(txn) ==
     LET committedOps == UNION { {entry.cmd} : s \in Shards, entry \in shardLogs[s][1..shardCommitIndex[s]] }
     IN
@@ -329,16 +342,6 @@ CheckConflicts(txn) ==
 
 IsWrite(op) == op.type = "set_property"
 IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
-
-Conflict(op1, op2) ==
-    \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
-       /\ (op1.key = op2.key \/ op1.type \notin {"set_property"}))
-    \/ (IsTreeMod(op1) /\ (op2.node \in Descendants(op1.node) \/ op1.node \in Descendants(op2.node)))
-    \/ (IsTreeMod(op2) /\ (op1.node \in Descendants(op2.node) \/ op2.node \in Descendants(op1.node)))
-    \/ (op1.type = "move_child" /\ op2.type = "move_child" 
-       /\ op1.parent = op2.parent /\ op1.child_node = op2.child_node)
-    \/ (op1.type = "move_child" /\ op2.type \in {"add_child", "add_sibling"} 
-       /\ op1.parent = op2.target)
 
 Linearizability ==
     \A s1, s2 \in Shards:
