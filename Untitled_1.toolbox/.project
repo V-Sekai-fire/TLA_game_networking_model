@@ -21,6 +21,11 @@
 			<locationURI>PARENT-1-PROJECT_LOC/GodotSync.tla</locationURI>
 		</link>
 		<link>
+			<name>MultiRaft.tla</name>
+			<type>1</type>
+			<location>/Users/ernest.lee/Desktop/vsk-networking-model-checker/MultiRaft.tla</location>
+		</link>
+		<link>
 			<name>ParallelCommits.tla</name>
 			<type>1</type>
 			<location>/Users/ernest.lee/Desktop/vsk-networking-model-checker/ParallelCommits.tla</location>

@@ -1,5 +1,5 @@
 ------------------------------ MODULE GodotSync ------------------------------
-EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, ParallelCommits
+EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, MultiRaft, ParallelCommits
 
 CONSTANTS
     GodotNodes,        \* Initial node tree structure in LCRS form
