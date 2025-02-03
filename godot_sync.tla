@@ -82,6 +82,26 @@ FilterSeq(seq, elem) ==
     ELSE IF Head(seq) = elem THEN FilterSeq(Tail(seq), elem)
     ELSE <<Head(seq)>> \o FilterSeq(Tail(seq), elem)
 
+\* Recursive operator to build transfer entries
+RecursiveTransfer(remaining, acc) ==
+    IF remaining = << >> 
+    THEN acc
+    ELSE LET n == Head(remaining)
+             newEntry == [ type |-> "state_transfer",
+                            node |-> n,
+                            state |-> sceneState[n],
+                            hlc |-> <<pt[n], l[n], c[n]>> ]
+         IN RecursiveTransfer(Tail(remaining), acc \o <<newEntry>>)
+
+\* Recursive operator to build remove entries
+RecursiveRemove(remaining, acc) ==
+    IF remaining = << >> 
+    THEN acc
+    ELSE LET n == Head(remaining)
+             newEntry == [ type |-> "shard_remove",
+                            node |-> n ]
+         IN RecursiveRemove(Tail(remaining), acc \o <<newEntry>>)
+
 ApplySceneOp(op) ==
     LET RemoveFromOriginalParent(n, p) ==
         IF sceneState[p].left_child = n 
@@ -190,57 +210,52 @@ ApplySceneOp(op) ==
                 new_order == SubSeq(filtered, 1, adj_idx) \o <<c>> \o SubSeq(filtered, adj_idx+1, Len(filtered))
             IN
             RebuildSiblingLinks(p, new_order)
-  [] op.type = "move_shard" ->
-        LET old_shards == shardMap[op.node]
-            OrderedDescendants(node) == 
-                LET Children(n) == 
-                    LET first == sceneState[n].left_child
-                    IN  IF first = NULL THEN << >> 
-                        ELSE <<first>> \o Siblings(first)
-                    Siblings(n) == 
-                        LET sib == sceneState[n].right_sibling
-                        IN  IF sib = NULL THEN << >> 
-                            ELSE <<sib>> \o Siblings(sib)
-                IN  <<node>> \o Children(node)  \* Pre-order traversal
+ 
+   [] op.type = "move_shard" ->
+        LET 
+            OrderedDescendants(node) == ...  \* Your existing definition
             descendantsSeq == OrderedDescendants(op.node)
-            original_parent == 
-                IF \E p \in DOMAIN sceneState : 
-                    sceneState[p].left_child = op.node \/ sceneState[p].right_sibling = op.node
-                THEN CHOOSE p \in DOMAIN sceneState : 
-                        sceneState[p].left_child = op.node \/ 
-                        sceneState[p].right_sibling = op.node
-                ELSE NULL
-            newEntries == [s \in Shards |-> 
-                IF s = op.new_shard 
-                    THEN << [ type |-> "state_transfer",
-                              node |-> n,
-                              state |-> sceneState[n],
-                              hlc |-> <<pt[n], l[n], c[n]>> ] : n \in descendantsSeq >>
-                ELSE IF s \in old_shards 
-                    THEN << [ type |-> "shard_remove", node |-> n ] : n \in descendantsSeq >> 
-                ELSE << >> ]
-        IN 
+            
+            \* Build sequences recursively
+            transferEntries == RecursiveTransfer(descendantsSeq, << >>)
+            removeEntries == RecursiveRemove(descendantsSeq, << >>)
+        IN
+        LET newEntries == [s \in Shards |-> 
+            IF s = op.new_shard 
+                THEN transferEntries
+            ELSE IF s \in old_shards 
+                THEN removeEntries
+            ELSE << >> ]
+        IN
         /\ \A s \in Shards : 
             IF newEntries[s] /= << >> THEN
-                LeaderAppend(s, newEntries[s])
-        /\ shardMap' = [n \in NodeID |-> 
-            IF n \in descendantsSeq THEN {op.new_shard} ELSE shardMap[n]]
-        /\ IF original_parent /= NULL THEN
-            LET detach_op == [type |-> "detach_child", node |-> original_parent, child |-> op.node]
-            IN \A s \in shardMap[original_parent] :
-                LeaderAppend(s, detach_op)
+                /\ LeaderAppend(s, newEntries[s])
+                /\ shardMap' = [n \in NodeID |-> 
+                    IF n \in descendantsSeq THEN {op.new_shard} ELSE shardMap[n]]
+                /\ IF original_parent /= NULL THEN
+                    LET detach_op == [type |-> "detach_child", node |-> original_parent, child |-> op.node]
+                    IN \A s \in shardMap[original_parent] :
+                        LeaderAppend(s, detach_op)
+                  ELSE
+                    UNCHANGED <<shardMap, sceneState>> 
+            ELSE
+                UNCHANGED <<shardMap, sceneState>> 
         /\ IF op.new_parent /= NULL THEN
             LeaderAppend(op.new_shard, [type |-> "attach_child", 
                                       node |-> op.new_parent, 
                                       child |-> op.node, 
                                       position |-> op.position])
+          ELSE
+            UNCHANGED <<shardMap, sceneState>>
         /\ IF op.new_parent = NULL THEN
             LeaderAppend(op.new_shard, [type |-> "add_child", 
                                       target |-> NULL, 
                                       new_node |-> op.node, 
                                       properties |-> sceneState[op.node].properties])
+          ELSE
+            UNCHANGED <<shardMap, sceneState>>
         /\ UNCHANGED <<sceneState>>
-
+ 
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
