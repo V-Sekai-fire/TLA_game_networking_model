@@ -370,7 +370,10 @@ NoDanglingIntents ==
     \A txn \in DOMAIN pendingTxns:
         pendingTxns[txn].status = "COMMITTED" => 
             \A s \in pendingTxns[txn].shards:
-                \E! entry \in shardLogs[s] : entry.cmd.txnId = txn
+                \E entry \in shardLogs[s] : 
+                    /\ entry.cmd.txnId = txn
+                    /\ \A otherEntry \in shardLogs[s] : 
+                        (otherEntry.cmd.txnId = txn) => (otherEntry = entry)
 
 CrossShardAtomicity ==
     \A t1, t2 \in pendingTxns :
@@ -383,9 +386,10 @@ CrossShardAtomicity ==
 
 NoPartialBatches ==
     \A entry \in UNION {shardLogs[s] : s \in Shards} :
-        entry.cmd.type = "batch_update" =>
+        entry.cmd.type = "batch_update" => 
             \A update \in entry.cmd.updates :
-                \E! e \in UNION {shardLogs[s] : s \in Shards} : e.hlc = entry.hlc /\ e.cmd.node = update.node
+                \E! e \in UNION {shardLogs[s] : s \in Shards} :
+                    e.hlc = entry.hlc /\ e.cmd.node = update.node
 
 PropertyTombstoneConsistency ==  
     \A n \in DOMAIN sceneState :
