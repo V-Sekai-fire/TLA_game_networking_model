@@ -87,10 +87,12 @@ OrderedChildren(p) ==
         THEN << >>
         ELSE OrderedChildrenAux(first_child, <<first_child>>)
 
+RECURSIVE FilterSeq(_, _)
 FilterSeq(seq, elem) ==
     IF seq = << >> THEN << >>
-    ELSE IF Head(seq) = elem THEN FilterSeq(Tail(seq), elem)
-    ELSE <<Head(seq)>> \o FilterSeq(Tail(seq), elem)
+    ELSE IF Head(seq) = elem 
+         THEN FilterSeq(Tail(seq), elem)
+         ELSE <<Head(seq)>> \o FilterSeq(Tail(seq), elem)
 
 \* Recursive operator to build transfer entries
 RecursiveTransfer(remaining, acc) ==
