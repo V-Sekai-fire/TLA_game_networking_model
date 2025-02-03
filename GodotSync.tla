@@ -100,7 +100,7 @@ FilterSeq(seq, elem) ==
          THEN FilterSeq(Tail(seq), elem)
          ELSE <<Head(seq)>> \o FilterSeq(Tail(seq), elem)
 
-\* Recursive operator to build transfer entries
+RECURSIVE RecursiveTransfer(_, _)
 RecursiveTransfer(remaining, acc) ==
     IF remaining = << >> 
     THEN acc
@@ -111,7 +111,7 @@ RecursiveTransfer(remaining, acc) ==
                             hlc |-> <<pt[n], l[n], c[n]>> ]
          IN RecursiveTransfer(Tail(remaining), acc \o <<newEntry>>)
 
-\* Recursive operator to build remove entries
+RECURSIVE RecursiveRemove(_, _)
 RecursiveRemove(remaining, acc) ==
     IF remaining = << >> 
     THEN acc
@@ -119,6 +119,20 @@ RecursiveRemove(remaining, acc) ==
              newEntry == [ type |-> "shard_remove",
                             node |-> n ]
          IN RecursiveRemove(Tail(remaining), acc \o <<newEntry>>)
+
+RECURSIVE Siblings(_)
+Siblings(n) == 
+    LET sib == sceneState[n].right_sibling
+    IN  IF sib = NULL THEN {} ELSE {sib} \cup Siblings(sib)
+
+Children(n) == 
+    LET first == sceneState[n].left_child
+    IN  IF first = NULL THEN {} 
+        ELSE {first} \cup Siblings(first)
+
+RECURSIVE Descendants(_)
+Descendants(n) == 
+    {n} \cup UNION { Descendants(children) : children \in Children(n) }
 
 RECURSIVE ApplySceneOp(_)
 ApplySceneOp(op) ==
@@ -128,16 +142,6 @@ ApplySceneOp(op) ==
         ELSE IF sceneState[p].right_sibling = n 
              THEN [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
              ELSE sceneState
-    IN
-    LET Children(n) == 
-        LET first == sceneState[n].left_child
-        IN  IF first = NULL THEN {} 
-            ELSE {first} \cup Siblings(first)
-    Siblings(n) == 
-        LET sib == sceneState[n].right_sibling
-        IN  IF sib = NULL THEN {} ELSE {sib} \cup Siblings(sib)
-    Descendants(n) == 
-        {n} \cup UNION { Descendants(c) : c \in Children(n) }
     IN
     LET RebuildSiblingLinks(p, children) ==
         IF children = << >> 
