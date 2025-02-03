@@ -22,7 +22,7 @@ VARIABLES
     (* Godot Scene State *)
     sceneState,         \* [node |-> [left_child, right_sibling, properties]]
     pendingTxns,       \* [txnId |-> [status, shards, hlc, ops]]
-    appliedIndex,      \* Last applied log index per node
+    appliedIndex,      \* [NodeID |-> [ShardID |-> Nat]]
     
     (* Shard Mapping *)
     shardMap,         \* [node |-> SUBSET Shards]
@@ -80,87 +80,98 @@ LeaderAppend(shard, op) ==
 ApplySceneOp(op) ==
     LET RemoveFromOriginalParent(n, p) ==
         IF sceneState[p].left_child = n 
-        THEN sceneState' = [sceneState EXCEPT ![p].left_child = sceneState[n].right_sibling]
+        THEN [sceneState EXCEPT ![p].left_child = sceneState[n].right_sibling]
         ELSE IF sceneState[p].right_sibling = n 
-             THEN sceneState' = [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
-             ELSE UNCHANGED sceneState
+             THEN [sceneState EXCEPT ![p].right_sibling = sceneState[n].right_sibling]
+             ELSE sceneState
     IN
-    LET Descendants(n) == 
-        LET Children == { sceneState[n].left_child } \cup { m \in DOMAIN sceneState : \E k \in DOMAIN sceneState : m = sceneState[k].right_sibling }
-        IN  IF Children = {} THEN {n} ELSE {n} \cup UNION { Descendants(c) : c \in Children } 
+    LET Children(n) == 
+        LET first = sceneState[n].left_child
+        IN  IF first = NULL THEN {} 
+            ELSE {first} \cup Siblings(first)
+    Siblings(n) == 
+        LET sib = sceneState[n].right_sibling
+        IN  IF sib = NULL THEN {} ELSE {sib} \cup Siblings(sib)
+    Descendants(n) == 
+        {n} \cup UNION { Descendants(c) : c \in Children(n) }
     IN
     LET RebuildSiblingLinks(p, children) ==
         IF children = << >> 
         THEN [sceneState EXCEPT ![p].left_child = NULL]
         ELSE LET first == Head(children)
                   rest == Tail(children)
-             IN  LET UpdateSiblings(s, i) ==
-                      IF i > Len(rest) THEN s
-                      ELSE [s EXCEPT ![children[i]].right_sibling = 
-                            IF i = Len(rest) THEN NULL ELSE children[i+1]]
-             IN  [sceneState EXCEPT 
-                  ![p].left_child = first,
-                  Iterate(i \in 1..Len(rest): UpdateSiblings(@, i))]
+                  UpdateSiblings(s, i) ==
+                      [s EXCEPT ![children[i]].right_sibling = 
+                        IF i = Len(rest) THEN NULL ELSE children[i+1]]
+                  indices == 1..Len(rest)
+                  initialSceneState == [sceneState EXCEPT ![p].left_child = first]
+                  updatedState == Fold(UpdateSiblings, initialSceneState, indices)
+             IN updatedState
     IN
     CASE op.type = "add_child" ->
         LET target == op.target IN
         LET new == op.new_node IN
         IF target = NULL THEN
             \* Handle root creation
-            sceneState' = [sceneState EXCEPT
-                          ![new] = [ left_child |-> NULL,
-                                    right_sibling |-> NULL,
-                                    properties |-> op.properties ]]
+            [sceneState EXCEPT
+             ![new] = [ left_child |-> NULL,
+                      right_sibling |-> NULL,
+                      properties |-> op.properties ]]
         ELSE
             \* Existing add_child logic for non-NULL parent
-            sceneState' = [sceneState EXCEPT
-                          ![target].left_child = new,
-                          ![new] = [ left_child |-> NULL,
-                                    right_sibling |-> sceneState[target].left_child,
-                                    properties |-> op.properties ]]
+            [sceneState EXCEPT
+             ![target].left_child = new,
+             ![new] = [ left_child |-> NULL,
+                      right_sibling |-> sceneState[target].left_child,
+                      properties |-> op.properties ]]
   [] op.type = "add_sibling" ->
         LET target == op.target IN
         LET new == op.new_node IN
-        sceneState' = [sceneState EXCEPT
-                      ![target].right_sibling = new,
-                      ![new] = [ left_child |-> NULL,
-                                right_sibling |-> sceneState[target].right_sibling,
-                                properties |-> op.properties ]]
+        [sceneState EXCEPT
+         ![target].right_sibling = new,
+         ![new] = [ left_child |-> NULL,
+                  right_sibling |-> sceneState[target].right_sibling,
+                  properties |-> op.properties ]]
   [] op.type = "remove_node" ->
       LET node == op.node IN
       LET descendants == Descendants(node) IN
-      /\ sceneState' = [n \in DOMAIN sceneState |-> IF n \in descendants THEN UNDEFINED ELSE sceneState[n]]
-      /\ \A parent \in DOMAIN sceneState :
-          IF sceneState[parent].left_child \in descendants THEN
-              sceneState'[parent].left_child = NULL
-          ELSE IF sceneState[parent].right_sibling \in descendants THEN
-              sceneState'[parent].right_sibling = NULL
+      [n \in DOMAIN sceneState |-> 
+        IF n \in descendants THEN UNDEFINED 
+        ELSE IF sceneState[n].left_child \in descendants THEN [sceneState[n] EXCEPT !.left_child = NULL]
+        ELSE IF sceneState[n].right_sibling \in descendants THEN [sceneState[n] EXCEPT !.right_sibling = NULL]
+        ELSE sceneState[n]]
   [] op.type = "set_property" ->
-        sceneState' = [sceneState EXCEPT
-                      ![op.node].properties = [op.node].properties @@ (op.key :> op.value) ]
+        [sceneState EXCEPT
+         ![op.node].properties = [op.node].properties @@ (op.key :> op.value) ]
   [] op.type = "move_subtree" ->
-        LET originalParent == CHOOSE p \in DOMAIN sceneState : 
-                                sceneState[p].left_child = op.node \/ 
-                                sceneState[p].right_sibling = op.node
+        LET originalParent == 
+            IF \E p \in DOMAIN sceneState : 
+                sceneState[p].left_child = op.node \/ sceneState[p].right_sibling = op.node
+            THEN CHOOSE p \in DOMAIN sceneState : 
+                    sceneState[p].left_child = op.node \/ 
+                    sceneState[p].right_sibling = op.node
+            ELSE NULL
         IN
-        /\ RemoveFromOriginalParent(op.node, originalParent)
-        /\ IF op.new_sibling /= NULL 
-            THEN sceneState' = [sceneState EXCEPT
-                               ![op.new_parent].right_sibling = op.node,
-                               ![op.node].right_sibling = sceneState[op.new_sibling].right_sibling]
-            ELSE sceneState' = [sceneState EXCEPT
-                               ![op.new_parent].left_child = op.node,
-                               ![op.node].right_sibling = sceneState[op.new_parent].left_child]
+        IF originalParent = NULL THEN sceneState
+        ELSE
+            LET stateAfterRemoval == RemoveFromOriginalParent(op.node, originalParent)
+            IN IF op.new_sibling /= NULL 
+                THEN [stateAfterRemoval EXCEPT
+                     ![op.new_parent].right_sibling = op.node,
+                     ![op.node].right_sibling = stateAfterRemoval[op.new_sibling].right_sibling]
+                ELSE [stateAfterRemoval EXCEPT
+                     ![op.new_parent].left_child = op.node,
+                     ![op.node].right_sibling = stateAfterRemoval[op.new_parent].left_child]
   [] op.type = "batch_update" ->
         LET ApplySingleUpdate(s, update) ==
             [s EXCEPT ![update.node].properties = @ @@ (update.key :> update.value)]
         IN
-        sceneState' = FoldLeft(ApplySingleUpdate, sceneState, op.updates)
+        Fold(ApplySingleUpdate, sceneState, op.updates)
   [] op.type = "batch_structure" ->
         LET ApplyOp(state, op) ==
             IF op.type \in DOMAIN SceneOperations THEN ApplySceneOp(op) ELSE state
         IN
-        sceneState' = FoldLeft(ApplyOp, sceneState, op.structure_ops)
+        Fold(ApplyOp, sceneState, op.structure_ops)
   [] op.type = "move_child" ->
         LET p == op.parent
             c == op.child_node
@@ -168,53 +179,52 @@ ApplySceneOp(op) ==
             adj_idx == IF op.to_index < 0 THEN Len(current) + op.to_index ELSE op.to_index
         IN
         IF c \notin current \/ adj_idx < 0 \/ adj_idx >= Len(current)
-        THEN UNCHANGED sceneState
+        THEN sceneState
         ELSE
             LET filtered == [x \in current : x /= c]
                 new_order == SubSeq(filtered, 1, adj_idx) \o <<c>> \o SubSeq(filtered, adj_idx+1, Len(filtered))
             IN
-            sceneState' = RebuildSiblingLinks(p, new_order)
+            RebuildSiblingLinks(p, new_order)
   [] op.type = "move_shard" ->
         LET old_shards = shardMap[op.node]
-            descendants = Descendants(op.node)  \* Get full subtree
-            original_parent = CHOOSE p \in DOMAIN sceneState : 
-                                 sceneState[p].left_child = op.node \/ 
-                                 sceneState[p].right_sibling = op.node
-        IN /\ \A n \in descendants :
-                /\ LeaderAppend(op.new_shard, [type: "state_transfer", node: n, 
-                                           state: sceneState[n], hlc: HLC])
-                /\ shardMap' = [shardMap EXCEPT ![n] = {op.new_shard}]
-                /\ \A s \in old_shards : 
-                    LeaderAppend(s, [type: "shard_remove", node: n])
-        \* Detach from original parent (cross-shard operation)
+            descendants = Descendants(op.node)
+            original_parent = 
+                IF \E p \in DOMAIN sceneState : 
+                    sceneState[p].left_child = op.node \/ sceneState[p].right_sibling = op.node
+                THEN CHOOSE p \in DOMAIN sceneState : sceneState[p].left_child = op.node \/ sceneState[p].right_sibling = op.node
+                ELSE NULL
+            newEntries == [s \in Shards |-> 
+                IF s = op.new_shard THEN << [type: "state_transfer", node: n, state: sceneState[n], hlc: HLC] : n \in descendants >>
+                ELSE IF s \in old_shards THEN << [type: "shard_remove", node: n] : n \in descendants >>
+                ELSE << >> ]
+        IN 
+        /\ \A s \in Shards : 
+            IF newEntries[s] /= << >> THEN
+                LeaderAppend(s, newEntries[s])
+        /\ shardMap' = [n \in NodeID |-> 
+            IF n \in descendants THEN {op.new_shard} ELSE shardMap[n]]
         /\ IF original_parent /= NULL THEN
             LET detach_op = [type: "detach_child", node: original_parent, child: op.node]
             IN \A s \in shardMap[original_parent] :
                 LeaderAppend(s, detach_op)
-        \* Attach to new parent in target shard (atomic with move)
         /\ IF op.new_parent /= NULL THEN
-            LET attach_op = [type: "attach_child", node: op.new_parent, 
-                            child: op.node, position: op.position]
-            IN LeaderAppend(op.new_shard, attach_op)
-        \* Preserve structure if no new parent (use add_child with NULL target)
+            LeaderAppend(op.new_shard, [type: "attach_child", node: op.new_parent, child: op.node, position: op.position])
         /\ IF op.new_parent = NULL THEN
             LeaderAppend(op.new_shard, [type: "add_child", target: NULL, new_node: op.node, properties: sceneState[op.node].properties])
-        \* Cleanup old shard references
-        /\ \A s \in old_shards :
-            LeaderAppend(s, [type: "shard_remove", node: op.node])
-        /\ UNCHANGED <<sceneState>>  \* State transfers handle structure
+        /\ UNCHANGED <<sceneState>>
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
     /\ n \in crashed
-    /\ appliedIndex' = [appliedIndex EXCEPT ![n] = 0]
-    /\ \A idx \in 0..(shardCommitIndex[n] - appliedIndex[n] - 1):
-        LET entry = shardLogs[shard][appliedIndex[n] + idx + 1]
-        IN  CASE entry.cmd.type = "state_transfer" ->
-                sceneState' = [sceneState EXCEPT ![entry.cmd.node] = entry.cmd.state]
-            [] OTHER ->
-                IF entry.shard \in shardMap[n] THEN ApplySceneOp(entry.cmd) ELSE UNCHANGED
-        /\ appliedIndex' = [appliedIndex EXCEPT ![n] = appliedIndex[n] + 1]
+    /\ appliedIndex' = [appliedIndex EXCEPT ![n] = [s \in Shards |-> 0]]
+    /\ \A s \in shardMap[n] :
+        \A idx \in 0..(shardCommitIndex[s] - appliedIndex[n][s] - 1):
+            LET entry = shardLogs[s][appliedIndex[n][s] + idx + 1]
+            IN  CASE entry.cmd.type = "state_transfer" ->
+                    sceneState' = [sceneState EXCEPT ![entry.cmd.node] = entry.cmd.state]
+                [] OTHER ->
+                    IF entry.shard = s THEN ApplySceneOp(entry.cmd) ELSE UNCHANGED
+            /\ appliedIndex' = [appliedIndex EXCEPT ![n][s] = appliedIndex[n][s] + 1]
     /\ crashed' = crashed \ {n}
 
 (*-------------------------- Parallel Commit Protocol -----------------------*)
