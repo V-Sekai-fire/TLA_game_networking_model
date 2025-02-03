@@ -344,9 +344,9 @@ IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "
 Linearizability ==
     \A s1, s2 \in Shards:
         \A i \in 1..Len(shardLogs[s1]):
-            \A j \in 1..Len(shardLogs[s2]):
-                shardLogs[s1][i].hlc < shardLogs[s2][j].hlc => 
-                    ~\E op1 \in {shardLogs[s1][i].cmd}, op2 \in {shardLogs[s2][j].cmd} : 
+            \A k \in 1..Len(shardLogs[s2]):
+                shardLogs[s1][i].hlc < shardLogs[s2][k].hlc => 
+                    ~\E op1 \in {shardLogs[s1][i].cmd}, op2 \in {shardLogs[s2][k].cmd} : 
                         Conflict(op1, op2)
 
 NoOrphanNodes ==
