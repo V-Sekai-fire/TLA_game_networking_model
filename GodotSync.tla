@@ -74,6 +74,19 @@ LeaderAppend(shard, op) ==
         /\ UNCHANGED <<shardTerms, shardCommitIndex>>
 
 (*-------------------------- Scene Tree Operations -----------------------*)
+
+RECURSIVE OrderedChildrenAux(_, _)
+OrderedChildrenAux(n, acc) ==
+    IF n = NULL
+    THEN acc
+    ELSE OrderedChildrenAux(sceneState[n].right_sibling, acc \o <<n>>)
+
+OrderedChildren(p) ==
+    LET first_child == sceneState[p].left_child
+    IN  IF first_child = NULL
+        THEN << >>
+        ELSE OrderedChildrenAux(first_child, <<first_child>>)
+
 FilterSeq(seq, elem) ==
     IF seq = << >> THEN << >>
     ELSE IF Head(seq) = elem THEN FilterSeq(Tail(seq), elem)
