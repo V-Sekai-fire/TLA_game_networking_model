@@ -32,36 +32,36 @@ VARIABLES
 HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
-    [ type: {"add_child", "add_sibling", "remove_node", "move_shard",
-            "set_property", "move_subtree", 
-            "batch_update", "batch_structure", "move_child"},
-      target: NodeID,    \* For add_child/add_sibling: target node
-      new_node: NodeID, \* For add_child/add_sibling: new node ID
-      node: NodeID,     \* Node to act on
-      parent: NodeID,   \* For move_child: parent node
-      child_node: NodeID, \* For move_child: node to move
-      to_index: Int,    \* For move_child: target position
-      properties: JSON, \* Initial properties for new nodes
-      key: STRING,      \* For property operations
-      value: STRING,     \* For set_property
-      new_parent: NodeID,  \* For move_subtree
-      new_sibling: NodeID, \* For move_subtree
-      updates: Seq([node: NodeID, key: STRING, value: STRING]),
-      structure_ops: Seq(SceneOp),
-      new_shard: Shards ]  \* For move_shard
+    [ type |-> {"add_child", "add_sibling", "remove_node", "move_shard",
+               "set_property", "move_subtree", 
+               "batch_update", "batch_structure", "move_child"},
+      target |-> NodeID,    \* For add_child/add_sibling: target node
+      new_node |-> NodeID, \* For add_child/add_sibling: new node ID
+      node |-> NodeID,     \* Node to act on
+      parent |-> NodeID,   \* For move_child: parent node
+      child_node |-> NodeID, \* For move_child: node to move
+      to_index |-> Int,    \* For move_child: target position
+      properties |-> JSON, \* Initial properties for new nodes
+      key |-> STRING,      \* For property operations
+      value |-> STRING,     \* For set_property
+      new_parent |-> NodeID,  \* For move_subtree
+      new_sibling |-> NodeID, \* For move_subtree
+      updates |-> Seq([node |-> NodeID, key |-> STRING, value |-> STRING]),
+      structure_ops |-> Seq(SceneOp),
+      new_shard |-> Shards ]  \* For move_shard
 
 TxnState ==
-    [ txnId: Nat,
-      status: {"COMMITTING", "COMMITTED", "ABORTED"},
-      shards: SUBSET Shards,
-      coordShard: Shards,  \* Coordinator shard for parallel commit
-      hlc: HLC,
-      ops: Seq(SceneOp) ]
+    [ txnId |-> Nat,
+      status |-> {"COMMITTING", "COMMITTED", "ABORTED"},
+      shards |-> SUBSET Shards,
+      coordShard |-> Shards,  \* Coordinator shard for parallel commit
+      hlc |-> HLC,
+      ops |-> Seq(SceneOp) ]
 
 JSON == [key |-> STRING]  \* Simplified JSON representation
 
 (*-------------------------- Raft-HLC Integration --------------------------*)
-ShardLogEntry == [term: Nat, cmd: SceneOp \/ TxnState, hlc: HLC, shard: Shards]
+ShardLogEntry == [term |-> Nat, cmd |-> SceneOp \/ TxnState, hlc |-> HLC, shard |-> Shards]
 
 LeaderAppend(shard, op) ==
     LET leader == shardLeaders[shard]
@@ -191,32 +191,56 @@ ApplySceneOp(op) ==
             IN
             RebuildSiblingLinks(p, new_order)
   [] op.type = "move_shard" ->
-        LET old_shards = shardMap[op.node]
-            descendants = Descendants(op.node)
-            original_parent = 
+        LET old_shards == shardMap[op.node]
+            OrderedDescendants(node) == 
+                LET Children(n) == 
+                    LET first == sceneState[n].left_child
+                    IN  IF first = NULL THEN << >> 
+                        ELSE <<first>> \o Siblings(first)
+                    Siblings(n) == 
+                        LET sib == sceneState[n].right_sibling
+                        IN  IF sib = NULL THEN << >> 
+                            ELSE <<sib>> \o Siblings(sib)
+                IN  <<node>> \o Children(node)  \* Pre-order traversal
+            descendantsSeq == OrderedDescendants(op.node)
+            original_parent == 
                 IF \E p \in DOMAIN sceneState : 
                     sceneState[p].left_child = op.node \/ sceneState[p].right_sibling = op.node
-                THEN CHOOSE p \in DOMAIN sceneState : sceneState[p].left_child = op.node \/ sceneState[p].right_sibling = op.node
+                THEN CHOOSE p \in DOMAIN sceneState : 
+                        sceneState[p].left_child = op.node \/ 
+                        sceneState[p].right_sibling = op.node
                 ELSE NULL
             newEntries == [s \in Shards |-> 
-                IF s = op.new_shard THEN << [type: "state_transfer", node: n, state: sceneState[n], hlc: HLC] : n \in descendants >>
-                ELSE IF s \in old_shards THEN << [type: "shard_remove", node: n] : n \in descendants >>
+                IF s = op.new_shard 
+                    THEN << [ type |-> "state_transfer",
+                              node |-> n,
+                              state |-> sceneState[n],
+                              hlc |-> <<pt[n], l[n], c[n]>> ] : n \in descendantsSeq >>
+                ELSE IF s \in old_shards 
+                    THEN << [ type |-> "shard_remove", node |-> n ] : n \in descendantsSeq >> 
                 ELSE << >> ]
         IN 
         /\ \A s \in Shards : 
             IF newEntries[s] /= << >> THEN
                 LeaderAppend(s, newEntries[s])
         /\ shardMap' = [n \in NodeID |-> 
-            IF n \in descendants THEN {op.new_shard} ELSE shardMap[n]]
+            IF n \in descendantsSeq THEN {op.new_shard} ELSE shardMap[n]]
         /\ IF original_parent /= NULL THEN
-            LET detach_op = [type: "detach_child", node: original_parent, child: op.node]
+            LET detach_op == [type |-> "detach_child", node |-> original_parent, child |-> op.node]
             IN \A s \in shardMap[original_parent] :
                 LeaderAppend(s, detach_op)
         /\ IF op.new_parent /= NULL THEN
-            LeaderAppend(op.new_shard, [type: "attach_child", node: op.new_parent, child: op.node, position: op.position])
+            LeaderAppend(op.new_shard, [type |-> "attach_child", 
+                                      node |-> op.new_parent, 
+                                      child |-> op.node, 
+                                      position |-> op.position])
         /\ IF op.new_parent = NULL THEN
-            LeaderAppend(op.new_shard, [type: "add_child", target: NULL, new_node: op.node, properties: sceneState[op.node].properties])
+            LeaderAppend(op.new_shard, [type |-> "add_child", 
+                                      target |-> NULL, 
+                                      new_node |-> op.node, 
+                                      properties |-> sceneState[op.node].properties])
         /\ UNCHANGED <<sceneState>>
+
 
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
@@ -239,7 +263,7 @@ StartParallelCommit(txn) ==
     IN
     /\ pendingTxns' = [pendingTxns EXCEPT ![txn.txnId] = txnEntry]
     /\ \A s \in txn.shards :
-        LeaderAppend(s, IF s = coordShard THEN txnEntry ELSE [type: "COMMIT", txnId: txn.txnId, hlc: txn.hlc])
+        LeaderAppend(s, IF s = coordShard THEN txnEntry ELSE [type |-> "COMMIT", txnId |-> txn.txnId, hlc |-> txn.hlc])
 
 CheckParallelCommit(txnId) == 
     LET txn == pendingTxns[txnId]
