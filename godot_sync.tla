@@ -260,21 +260,31 @@ ApplySceneOp(op) ==
 (*-------------------------- Crash Recovery --------------------------*)
 RecoverNode(n) ==
     /\ n \in crashed
-    /\ appliedIndex' = [appliedIndex EXCEPT ![n] = [s \in Shards |-> 0]]
-    /\ \A s \in shardMap[n] :
-        \A idx \in 0..(shardCommitIndex[s] - appliedIndex[n][s] - 1):
-            LET entry = shardLogs[s][appliedIndex[n][s] + idx + 1]
-            IN  CASE entry.cmd.type = "state_transfer" ->
-                    sceneState' = [sceneState EXCEPT ![entry.cmd.node] = entry.cmd.state]
-                [] OTHER ->
-                    IF entry.shard = s THEN ApplySceneOp(entry.cmd) ELSE UNCHANGED
-            /\ appliedIndex' = [appliedIndex EXCEPT ![n][s] = appliedIndex[n][s] + 1]
+    /\ LET ProcessShard(s) ==
+           LET maxIdx == shardCommitIndex[s] - appliedIndex[n][s] - 1
+               entries == { shardLogs[s][appliedIndex[n][s] + idx + 1] : idx \in 0..maxIdx }
+               stateTransfers == { entry \in entries : entry.cmd.type = "state_transfer" }
+               sceneUpdates == [node \in Nodes |->
+                                  IF \E entry \in stateTransfers : entry.cmd.node = node
+                                  THEN (CHOOSE entry \in stateTransfers : entry.cmd.node = node).cmd.state
+                                  ELSE sceneState[node]]
+               appliedDelta == IF s \in shardMap[n] THEN shardCommitIndex[s] - appliedIndex[n][s] ELSE 0
+           IN <<sceneUpdates, appliedDelta>>
+       IN 
+           /\ sceneState' = [node \in Nodes |->
+                               CHOOSE update \in { ProcessShard(s)[1][node] : s \in shardMap[n] } \cup {sceneState[node]}
+                               : TRUE]
+           /\ appliedIndex' = [appliedIndex EXCEPT ![n] = 
+                                  [s \in Shards |->
+                                      IF s \in shardMap[n]
+                                      THEN appliedIndex[n][s] + ProcessShard(s)[2]
+                                      ELSE appliedIndex[n][s]]]
     /\ crashed' = crashed \ {n}
 
 (*-------------------------- Parallel Commit Protocol -----------------------*)
 StartParallelCommit(txn) ==
     LET coordShard == CHOOSE s \in txn.shards : TRUE
-    LET txnEntry == [txn EXCEPT !.status = "COMMITTING", !.coordShard = coordShard]
+        txnEntry == [txn EXCEPT !.status = "COMMITTING", !.coordShard = coordShard]
     IN
     /\ pendingTxns' = [pendingTxns EXCEPT ![txn.txnId] = txnEntry]
     /\ \A s \in txn.shards :
@@ -288,7 +298,7 @@ CheckParallelCommit(txnId) ==
             /\ idx <= shardCommitIndex[s]
     IN
     IF \A s \in txn.shards : committedInShard(s)
-    THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
+    THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status := "COMMITTED"]
          /\ ApplyTxnOps(txn.ops)
     ELSE IF HLC_Diff(pc[self], txn.hlc) > MaxLatency
     THEN AbortTxn(txnId)
