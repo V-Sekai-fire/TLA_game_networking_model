@@ -26,7 +26,7 @@ VARIABLES
     crashed           \* Set of crashed nodes
 
 (*--------------------------- Type Definitions ----------------------------*)
-HLC == <<l[self], c[self]>>  \* Correct HLC tuple without pt
+HLC(n) == <<l[n], c[n]>>  \* HLC tuple for node n
 
 JSON == [key |-> STRING]  \* Simplified JSON representation
 
@@ -65,7 +65,7 @@ LeaderAppend(shard, op) ==
         new_pt == pt[leader] + 1
         new_l == IF l[leader] >= new_pt THEN l[leader] ELSE new_pt
         new_c == IF l[leader] >= new_pt THEN c[leader] + 1 ELSE 0
-        entry == [term |-> shardTerms[shard], cmd |-> op, hlc |-> <<new_pt, new_l, new_c>>, shard |-> shard]
+        entry == [term |-> shardTerms[shard], cmd |-> op, hlc |-> HLC(leader), shard |-> shard]
     IN  /\ pt' = [pt EXCEPT ![leader] = new_pt]
         /\ l' = [l EXCEPT ![leader] = new_l]
         /\ c' = [c EXCEPT ![leader] = new_c]
@@ -305,7 +305,7 @@ RecoverNode(n) ==
     /\ crashed' = crashed \ {n}
 
 (*-------------------------- Parallel Commit Protocol -----------------------*)
-HLC_Diff(h1, h2) == h2.l - h1.l
+HLC_Diff(n, h2) == h2.l - HLC(n).l
 
 StartParallelCommit(txn) ==
     LET coordShard == CHOOSE s \in txn.shards : TRUE
@@ -325,7 +325,7 @@ CheckParallelCommit(txnId) ==
     IF \A s \in txn.shards : committedInShard(s)
     THEN /\ pendingTxns' = [pendingTxns EXCEPT ![txnId].status = "COMMITTED"]
          /\ ApplyTxnOps(txn.ops)
-    ELSE IF HLC_Diff(<<l[self], c[self]>>, txn.hlc) > MaxLatency  \* Use l from HLC
+    ELSE IF HLC_Diff(currentNode, txn.hlc) > MaxLatency  \* Assuming currentNode is defined
          THEN AbortTxn(txnId)
          ELSE UNCHANGED <<pendingTxns, shardLogs>>
 
