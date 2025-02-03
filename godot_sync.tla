@@ -33,7 +33,7 @@ HLC == <<pt[self], l[self], c[self]>>  \* Combined HLC tuple
 
 SceneOp ==
     [ type: {"add_child", "add_sibling", "remove_node", "move_shard",
-            "set_property", "move_subtree", "remove_property", 
+            "set_property", "move_subtree", 
             "batch_update", "batch_structure", "move_child"},
       target: NodeID,    \* For add_child/add_sibling: target node
       new_node: NodeID, \* For add_child/add_sibling: new node ID
@@ -156,10 +156,6 @@ ApplySceneOp(op) ==
             ELSE sceneState' = [sceneState EXCEPT
                                ![op.new_parent].left_child = op.node,
                                ![op.node].right_sibling = sceneState[op.new_parent].left_child]
-  [] op.type = "remove_property" ->
-        sceneState' = [sceneState EXCEPT
-                      ![op.node].properties = [k \in DOMAIN sceneState[op.node].properties \ {op.key} |->
-                                               sceneState[op.node].properties[k]]]
   [] op.type = "batch_update" ->
         LET ApplySingleUpdate(s, update) ==
             [s EXCEPT ![update.node].properties = @ @@ (update.key :> update.value)]
@@ -263,7 +259,7 @@ CheckConflicts(txn) ==
 
 Conflict(op1, op2) ==
     \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
-       /\ (op1.key = op2.key \/ op1.type \notin {"set_property", "remove_property"}))
+       /\ (op1.key = op2.key \/ op1.type \notin {"set_property"}))
     \/ (IsTreeMod(op1) /\ (op2.node \in Descendants(op1.node) \/ op1.node \in Descendants(op2.node)))
     \/ (IsTreeMod(op2) /\ (op1.node \in Descendants(op2.node) \/ op2.node \in Descendants(op1.node)))
     \/ (op1.type = "move_child" /\ op2.type = "move_child" 
@@ -271,7 +267,7 @@ Conflict(op1, op2) ==
     \/ (op1.type = "move_child" /\ op2.type \in {"add_child", "add_sibling"} 
        /\ op1.parent = op2.target)
 
-IsWrite(op) == op.type \in {"set_property", "remove_property"}
+IsWrite(op) == op.type = "set_property"
 IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
 
 (*-------------------------- Safety Invariants ----------------------------*)
@@ -336,7 +332,7 @@ PropertyTombstoneConsistency ==
             \E! e \in UNION {shardLogs[s] : s \in Shards} : 
                 e.cmd.node = n /\ 
                 e.cmd.key = k /\ 
-                (e.cmd.type = "set_property" \/ e.cmd.type = "remove_property")
+                e.cmd.type = "set_property"
 
 SiblingOrderConsistency ==
     \A p \in DOMAIN sceneState:
