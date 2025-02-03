@@ -375,6 +375,43 @@ NoDanglingIntents ==
                     /\ \A otherEntry \in shardLogs[s] : 
                         (otherEntry.cmd.txnId = txn) => (otherEntry = entry)
 
+NoPartialBatches ==
+    \A entry \in UNION {shardLogs[s] : s \in Shards} :
+        entry.cmd.type = "batch_update" => 
+            \A update \in entry.cmd.updates :
+                \E e \in UNION {shardLogs[s] : s \in Shards} :
+                    e.hlc = entry.hlc /\ e.cmd.node = update.node
+                    /\ \A e2 \in UNION {shardLogs[s] : s \in Shards} :
+                        (e2.hlc = entry.hlc /\ e2.cmd.node = update.node) => e2 = e
+
+PropertyTombstoneConsistency ==  
+    \A n \in DOMAIN sceneState :
+        \A k \in DOMAIN sceneState[n].properties :
+            \E e \in UNION {shardLogs[s] : s \in Shards} : 
+                /\ e.cmd.node = n 
+                /\ e.cmd.key = k 
+                /\ e.cmd.type = "set_property"
+                /\ \A otherE \in UNION {shardLogs[s] : s \in Shards} : 
+                    (otherE.cmd.node = n 
+                     /\ otherE.cmd.key = k 
+                     /\ otherE.cmd.type = "set_property") 
+                    => (otherE = e)
+
+SiblingOrderConsistency ==
+    \A p \in DOMAIN sceneState:
+        LET children == OrderedChildren(p) IN
+        \A i \in 1..(Len(children)-1):
+            sceneState[children[i]].right_sibling = children[i+1]            
+
+ParallelCommitConsistency ==
+    \A txn \in pendingTxns : 
+        txn.status = "COMMITTED" => 
+            \A s \in txn.shards : 
+                \E e \in shardLogs[s] : 
+                    /\ e.cmd.txnId = txn.txnId
+                    /\ \A otherE \in shardLogs[s] : 
+                        (otherE.cmd.txnId = txn.txnId) => (otherE = e)
+
 CrossShardAtomicity ==
     \A t1, t2 \in pendingTxns :
         t1 /= t2 /\ t1.status /= "ABORTED" /\ t2.status /= "ABORTED"
@@ -384,31 +421,6 @@ CrossShardAtomicity ==
         t1 /= t2 /\ \E node: shardMap[node] \in t1.shards \cap t2.shards
         => ~\E op1 \in t1.ops, op2 \in t2.ops: Conflict(op1, op2)
 
-NoPartialBatches ==
-    \A entry \in UNION {shardLogs[s] : s \in Shards} :
-        entry.cmd.type = "batch_update" => 
-            \A update \in entry.cmd.updates :
-                \E! e \in UNION {shardLogs[s] : s \in Shards} :
-                    e.hlc = entry.hlc /\ e.cmd.node = update.node
-
-PropertyTombstoneConsistency ==  
-    \A n \in DOMAIN sceneState :
-        \A k \in DOMAIN sceneState[n].properties :
-            \E! e \in UNION {shardLogs[s] : s \in Shards} : 
-                e.cmd.node = n /\ 
-                e.cmd.key = k /\ 
-                e.cmd.type = "set_property"
-
-SiblingOrderConsistency ==
-    \A p \in DOMAIN sceneState:
-        LET children == OrderedChildren(p) IN
-        \A i \in 1..(Len(children)-1):
-            sceneState[children[i]].right_sibling = children[i+1]            
-ParallelCommitConsistency ==
-    \A txn \in pendingTxns : txn.status = "COMMITTED" => 
-        \A s \in txn.shards : 
-            \E! e \in shardLogs[s] : e.cmd.txnId = txn.txnId
-
 (*-------------------------- Configuration ---------------------------------*)
 ASSUME 
     /\ Cardinality(NodeID) >= 3
@@ -417,12 +429,17 @@ ASSUME
     /\ GodotNodes /= {}
     /\ NodeID \subseteq 1..1000
     /\ IsValidLCRSTree(GodotNodes)
-    /\ IF Cardinality(NodeID) = 1
-        THEN \A n \in NodeID : shardMap[n] = Shards
-        ELSE /\ \A n \in NodeID : Cardinality(shardMap[n]) = 1
-             /\ \A s \in Shards : 
-                 Cardinality({n \in NodeID : s \in shardMap[n]}) >= 3
-             /\ \A n \in NodeID : \E! s \in Shards : s \in shardMap[n]
-    /\ crashed = {} 
+    /\ (IF Cardinality(NodeID) = 1
+          THEN \A n \in NodeID : shardMap[n] = Shards
+          ELSE /\ \A n \in NodeID : Cardinality(shardMap[n]) = 1
+               /\ \A s \in Shards : 
+                   Cardinality({n \in NodeID : s \in shardMap[n]}) >= 3
+               /\ \A n \in NodeID : 
+                   \E s \in Shards : 
+                     /\ s \in shardMap[n]
+                     /\ \A otherS \in Shards : 
+                         (otherS \in shardMap[n]) => (otherS = s)
+        )
+    /\ crashed = {}
 
 =============================================================================
