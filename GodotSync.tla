@@ -57,8 +57,6 @@ TxnState ==
       hlc |-> HLC,
       ops |-> Seq(SceneOp) ]
 
-JSON == [key |-> STRING]  \* Simplified JSON representation
-
 (*-------------------------- Raft-HLC Integration --------------------------*)
 ShardLogEntry == [term |-> Nat, cmd |-> SceneOp \/ TxnState, hlc |-> HLC, shard |-> Shards]
 
@@ -317,6 +315,9 @@ CheckParallelCommit(txnId) ==
          ELSE UNCHANGED <<pendingTxns, shardLogs>>
 
 (*-------------------------- Safety Invariants ----------------------------*)
+IsWrite(op) == op.type = "set_property"
+IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
+
 Conflict(op1, op2) ==
     \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
        /\ (op1.key = op2.key \/ op1.type \notin {"set_property"}))
@@ -339,9 +340,6 @@ CheckConflicts(txn) ==
             [] OTHER ->
                 Conflict(op, entry) /\ entry.hlc < txn.hlc
             => AbortTxn(txn.txnId)
-
-IsWrite(op) == op.type = "set_property"
-IsTreeMod(op) == op.type \in {"move_subtree", "remove_node", "remove_subtree", "move_child"}
 
 Linearizability ==
     \A s1, s2 \in Shards:
