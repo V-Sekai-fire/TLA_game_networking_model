@@ -24,9 +24,7 @@ VARIABLES
     pendingTxns,       \* [txnId |-> [status, shards, hlc, ops]]
     appliedIndex,      \* Last applied log index per node
     
-    (* Coordination *)
-    preparedHLCs,     \* [ShardID |-> Seq(HLC)] for parallel commit
-    commitThresholds, \* [txnId |-> [shard |-> Nat]]
+    (* Shard Mapping *)
     shardMap,         \* [node |-> SUBSET Shards]
     crashed           \* Set of crashed nodes
 
@@ -226,12 +224,10 @@ StartParallelCommit(txn) ==
     LET txnEntry == [txn EXCEPT !.status = "COMMITTING", !.coordShard = coordShard]
     IN
     /\ pendingTxns' = [pendingTxns EXCEPT ![txn.txnId] = txnEntry]
-    /\ \A s \in txn.shards : 
-        IF s = coordShard
-        THEN LeaderAppend(s, txnEntry)
-        ELSE LeaderAppend(s, [type: "COMMIT", txnId: txn.txnId, hlc: txn.hlc])
+    /\ \A s \in txn.shards :
+        LeaderAppend(s, IF s = coordShard THEN txnEntry ELSE [type: "COMMIT", txnId: txn.txnId, hlc: txn.hlc])
 
-CheckParallelCommit(txnId) ==
+CheckParallelCommit(txnId) == 
     LET txn == pendingTxns[txnId]
     LET committedInShard(s) ==
         \E idx \in 1..Len(shardLogs[s]) : 
@@ -256,8 +252,6 @@ CheckConflicts(txn) ==
             [] OTHER ->
                 Conflict(op, entry) /\ entry.hlc < txn.hlc
             => AbortTxn(txn.txnId)
-    /\ \A s \in txn.shards :
-        preparedHLCs[s] = Append(preparedHLCs[s], txn.hlc)
 
 Conflict(op1, op2) ==
     \/ (op1.node = op2.node /\ (IsWrite(op1) /\ IsWrite(op2)) 
@@ -342,7 +336,9 @@ SiblingOrderConsistency ==
         \A i \in 1..(Len(children)-1):
             sceneState[children[i]].right_sibling = children[i+1]            
 ParallelCommitConsistency ==
-    \A txn \in pendingTxns : txn.status = "COMMITTED" => \A s \in txn.shards : \E! e \in shardLogs[s] : e.cmd.txnId = txn.txnId
+    \A txn \in pendingTxns : txn.status = "COMMITTED" => 
+        \A s \in txn.shards : 
+            \E! e \in shardLogs[s] : e.cmd.txnId = txn.txnId
 
 (*-------------------------- Configuration ---------------------------------*)
 ASSUME 
@@ -358,7 +354,6 @@ ASSUME
              /\ \A s \in Shards : 
                  Cardinality({n \in NodeID : s \in shardMap[n]}) >= 3
              /\ \A n \in NodeID : \E! s \in Shards : s \in shardMap[n]
-    /\ preparedHLCs = [s \in Shards |-> << >>]
     /\ crashed = {} 
 
 =============================================================================
