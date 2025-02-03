@@ -225,6 +225,22 @@ ClientRequest(s, shard, v) ==
        IN shardLogs' = [shardLogs EXCEPT ![shard][s] = newLog]
     /\ UNCHANGED <<messages, shardCurrentTerm, shardState, shardVotedFor>>
 
+(* Leader s processes an append entries response from a follower *)
+HandleAppendEntriesResponse(s, shard, m) ==
+    /\ m.mtype = AppendEntriesResponse
+    /\ shardState[shard][s] = Leader
+    /\ m.mterm = shardCurrentTerm[shard][s]
+    /\ LET follower == m.msource
+       IN IF m.msuccess THEN
+              /\ shardMatchIndex' = [shardMatchIndex EXCEPT ![shard][s][follower] = m.mmatchIndex]
+              /\ shardNextIndex' = [shardNextIndex EXCEPT ![shard][s][follower] = m.mmatchIndex + 1]
+          ELSE
+              /\ shardNextIndex' = [shardNextIndex EXCEPT ![shard][s][follower] = 
+                                      IF shardNextIndex[shard][s][follower] > 1 THEN shardNextIndex[shard][s][follower] - 1 ELSE 1]
+              /\ UNCHANGED shardMatchIndex
+    /\ Discard(m)
+    /\ UNCHANGED <<shardCurrentTerm, shardState, shardVotedFor, shardLogs, shardCommitIndex>>
+
 (* Server s processes an incoming message m for a specific shard *)
 Receive(m) ==
     LET s == m.mdest
