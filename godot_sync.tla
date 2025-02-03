@@ -1,9 +1,5 @@
 ------------------------------ MODULE GodotSync -----------------------------
-EXTENDS Integers, Sequences, TLC, FiniteSets
-
-INCLUDE "hybrid_logical_clocks/hlc"
-INCLUDE "raft/raft.tla"
-INCLUDE "parallel_commits/ParallelCommits.tla"
+EXTENDS Integers, Sequences, TLC, FiniteSets, hlc, raft, parallelcommits
 
 CONSTANTS
     GodotNodes,        \* Initial node tree structure in LCRS form
