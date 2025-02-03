@@ -417,6 +417,23 @@ CrossShardAtomicity ==
          /\ \E s \in Shards : s \in t1.shards /\ s \in t2.shards)
         => \A op1 \in t1.ops, op2 \in t2.ops : ~Conflict(op1, op2)
 
+IsValidLCRSTree(tree) ==
+    LET Nodes == DOMAIN tree
+        Root == { n \in Nodes : \A m \in Nodes : n /= tree[m].left_child /\ n /= tree[m].right_sibling }
+        ParentCount(n) == Cardinality({ m \in Nodes : n = tree[m].left_child \/ n = tree[m].right_sibling })
+        AllNodesHaveOneParent == \A n \in Nodes : (n \in Root /\ ParentCount(n) = 0) \/ (ParentCount(n) = 1)
+        RECURSIVE ReachableFrom(_)  \* Declare recursion first
+        ReachableFrom(n) ==         \* Then define the function
+            {n} 
+            \cup (IF tree[n].left_child /= NULL THEN ReachableFrom(tree[n].left_child) ELSE {}) 
+            \cup (IF tree[n].right_sibling /= NULL THEN ReachableFrom(tree[n].right_sibling) ELSE {})
+        Reachable == IF Root = {} THEN {} ELSE ReachableFrom(CHOOSE r \in Root : TRUE)
+    IN
+        /\ Cardinality(Root) = 1
+        /\ AllNodesHaveOneParent
+        /\ Nodes \subseteq Reachable
+        /\ Cardinality(Nodes) = Cardinality(Reachable)
+
 ASSUME 
     /\ Cardinality(NodeID) >= 3
     /\ Cardinality(Shards) = 2
