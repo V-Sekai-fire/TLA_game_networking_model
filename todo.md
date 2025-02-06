@@ -1,4 +1,4 @@
-Compare and contrast.
+Compare and contrast using TLA+ model checking.
 
 1. Solposis-like model
 2. Multi-Shard Scene Synchronization model (mine)
