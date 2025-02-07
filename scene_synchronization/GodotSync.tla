@@ -211,6 +211,55 @@ CausalConsistency ==
         hlcWatermark[n1] < hlcWatermark[n2] => 
             appliedIndex[n1] <= appliedIndex[n2]
 
+IsValidLCRSTree ==
+    LET Nodes == DOMAIN sceneState
+        \* Find root node (has no parents)
+        RootCandidates == {n \in Nodes : 
+                          \A m \in Nodes : 
+                              n /= sceneState[m].left_child /\ 
+                              n /= sceneState[m].right_sibling}
+        
+        \* Verify single root exists
+        SingleRoot == Cardinality(RootCandidates) = 1
+        
+        \* All non-root nodes have exactly one parent
+        ParentCount(n) == Cardinality(
+            {m \in Nodes : 
+                sceneState[m].left_child = n \/ 
+                sceneState[m].right_sibling = n}
+        )
+        ValidParentage == \A n \in Nodes : 
+                            n \in RootCandidates => ParentCount(n) = 0
+                            /\ n \notin RootCandidates => ParentCount(n) = 1
+        
+        \* Acyclicity check using depth-first traversal
+        RECURSIVE Visited(_)
+        Visited(seen) == 
+            IF seen = {} THEN {}
+            ELSE LET n == CHOOSE x \in seen : TRUE
+                     children == CASE sceneState[n].left_child /= NULL ->
+                                     {sceneState[n].left_child}
+                                  [] OTHER -> {}
+                     siblings == CASE sceneState[n].right_sibling /= NULL ->
+                                     {sceneState[n].right_sibling}
+                                  [] OTHER -> {}
+                  IN {n} \cup Visited((seen \ {n}) \cup children \cup siblings)
+        
+        Root == CHOOSE r \in RootCandidates : TRUE
+        Traversal == Visited({Root})
+        Acyclic == Traversal = Nodes
+    IN
+        /\ SingleRoot
+        /\ ValidParentage
+        /\ Acyclic
+        /\ \A n \in Nodes :
+            sceneState[n].left_child /= n  \* No self-child
+            /\ sceneState[n].right_sibling /= n  \* No self-sibling
+            /\ (sceneState[n].left_child /= NULL => 
+                sceneState[n].left_child \in Nodes)
+            /\ (sceneState[n].right_sibling /= NULL => 
+                sceneState[n].right_sibling \in Nodes)
+
 (*-------------------------- Initial State -------------------------------*)
 ASSUME 
     /\ Cardinality(NodeID) >= 3
