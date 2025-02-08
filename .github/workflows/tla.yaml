@@ -13,6 +13,7 @@ jobs:
       matrix:
         spec: 
           - { config: "bounded_counter/BoundedCounter.cfg", tla: "bounded_counter/BoundedCounter.tla" }
+          - { config: "hybrid_logic_clock/HybridLogicClock.cfg", tla: "hybrid_logic_clock/HybridLogicClock.tla" }
     name: Verify ${{ matrix.spec.tla }}
     steps:
       - name: Checkout repository
