@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   verify-specs:
@@ -34,15 +35,21 @@ jobs:
 
       - name: Verify TLA+ spec
         run: |
-          if [ -n "${{ matrix.spec.timeout }}" ]; then
-            timeout ${{ matrix.spec.timeout }} java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }} || exit_code=$?
-            if [ $exit_code -eq 124 ]; then
-              echo "🕒 Timeout reached - marking as passed"
-              exit 0
-            # Handle other failures
-            elif [ $exit_code -ne 0 ]; then
-              exit $exit_code
-            fi
-          else
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger - run without timeout
+            echo "🔄 Manual execution - running without timeout"
             java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }}
+          else
+            # Automated trigger - use existing timeout logic
+            if [ -n "${{ matrix.spec.timeout }}" ]; then
+              timeout ${{ matrix.spec.timeout }} java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }} || exit_code=$?
+              if [ $exit_code -eq 124 ]; then
+                echo "🕒 Timeout reached - marking as passed"
+                exit 0
+              elif [ $exit_code -ne 0 ]; then
+                exit $exit_code
+              fi
+            else
+              java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }}
+            fi
           fi
