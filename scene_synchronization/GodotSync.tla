@@ -23,7 +23,7 @@ HLC(n) == <<l[n], c[n]>>  \* HLC tuple for node n
 JSON == [key |-> STRING]  \* Simplified JSON representation
 
 SceneOp ==
-    [ type |-> {"add_child", "add_sibling", "remove_node", "set_property",
+    [ type |-> {"add_child", "add_sibling", "remove_node", "set",
                "move_subtree", "batch_update", "batch_structure", "move_child"},
       target |-> NodeID,    \* For add_child/add_sibling: target node
       new_node |-> NodeID, \* For add_child/add_sibling: new node ID
@@ -33,7 +33,7 @@ SceneOp ==
       to_index |-> Int,    \* For move_child: target position
       properties |-> JSON, \* Initial properties for new nodes
       key |-> STRING,      \* For property operations
-      value |-> STRING,     \* For set_property
+      value |-> STRING,     \* For set
       new_parent |-> NodeID,  \* For move_subtree
       new_sibling |-> NodeID, \* For move_subtree
       updates |-> Seq([node |-> NodeID, key |-> STRING, value |-> STRING]),
@@ -99,7 +99,7 @@ ApplySceneOp(op) ==
                 [sceneState EXCEPT 
                     ![parent].right_sibling = sceneState[node].right_sibling,
                     ![node] = UNDEFINED]
-    [] op.type = "set_property" ->
+    [] op.type = "set" ->
         [sceneState EXCEPT 
             ![op.node].properties = @ @@ (op.key :> op.value)]
     [] op.type = "move_subtree" ->
@@ -164,8 +164,8 @@ AbortTxn(txnId) ==
                  target |-> op.originalParent,
                  new_node |-> op.node,
                  properties |-> op.originalProperties]
-            [] op.type = "set_property" -> 
-                [type |-> "set_property",
+            [] op.type = "set" -> 
+                [type |-> "set",
                  node |-> op.node,
                  key |-> op.key,
                  value |-> op.previousValue]
