@@ -13,6 +13,7 @@ jobs:
     strategy:
       matrix:
         spec: 
+          - { config: "cybernetic_story/CyberneticSystem.cfg", tla: "cybernetic_story/CyberneticSystem.tla" }
           - { config: "bounded_counter/BoundedCounter.cfg", tla: "bounded_counter/BoundedCounter.tla" }
           - { config: "hybrid_logic_clock/HybridLogicClock.cfg", tla: "hybrid_logic_clock/HybridLogicClock.tla" }
           - { config: "parallel_commits/ParallelCommits.cfg", tla: "parallel_commits/ParallelCommits.tla" }
