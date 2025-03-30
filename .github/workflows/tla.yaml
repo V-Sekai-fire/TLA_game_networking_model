@@ -11,6 +11,7 @@ jobs:
   verify-specs:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         spec: 
           - { config: "cybernetic_story/CyberneticSystem.cfg", tla: "cybernetic_story/CyberneticSystem.tla" }
@@ -29,21 +30,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Download TLA+ tools
-        run: |
-          mkdir -p tla
-          wget -O tla/tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-
       - name: Verify TLA+ spec
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Manual trigger - run without timeout
             echo "🔄 Manual execution - running without timeout"
-            java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }}
+            java -XX:+UseParallelGC -jar thirdparty/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }}
           else
             # Automated trigger - use existing timeout logic
             if [ -n "${{ matrix.spec.timeout }}" ]; then
-              timeout ${{ matrix.spec.timeout }} java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }} || exit_code=$?
+              timeout ${{ matrix.spec.timeout }} java -XX:+UseParallelGC -jar thirdparty/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }} || exit_code=$?
               if [ $exit_code -eq 124 ]; then
                 echo "🕒 Timeout reached - marking as passed"
                 exit 0
@@ -51,6 +47,6 @@ jobs:
                 exit $exit_code
               fi
             else
-              java -XX:+UseParallelGC -jar tla/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }}
+              java -XX:+UseParallelGC -jar thirdparty/tla2tools.jar -config ${{ matrix.spec.config }} ${{ matrix.spec.tla }}
             fi
           fi
