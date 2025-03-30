@@ -18,6 +18,7 @@ jobs:
           - { config: "bounded_counter/BoundedCounter.cfg", tla: "bounded_counter/BoundedCounter.tla" }
           - { config: "hybrid_logic_clock/HybridLogicClock.cfg", tla: "hybrid_logic_clock/HybridLogicClock.tla" }
           - { config: "parallel_commits/ParallelCommits.cfg", tla: "parallel_commits/ParallelCommits.tla" }
+          - { config: "message_scaling_test/WorstCase10Soldiers.cfg", tla: "message_scaling_test/WorstCase10.tla", timeout: 10 }
           - { config: "raft/Raft.cfg", tla: "raft/Raft.tla", timeout: 60 }
     name: Verify ${{ matrix.spec.tla }}
     steps:

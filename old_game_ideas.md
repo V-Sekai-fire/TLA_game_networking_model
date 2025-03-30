@@ -27,3 +27,5 @@ Brickworks cell tiles file transfer
 Cells loaded to main thread deferred until done.
 
 Mesh streaming by meshlets
+
+Simulate 4000 networked players with frame rate and per connection maximum.
