@@ -46,3 +46,4 @@ time-of-build-pretty.log
 
 .DS_Store
 tla
+states/
