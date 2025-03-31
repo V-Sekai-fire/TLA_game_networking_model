@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/bugarela/tla-transmutation.git
+	branch = master
+	commit = 9bd01347ff65e1f238d2a38463b2b94df366944e
+	parent = 3463bdef7c554c1bdd64c1f2f686f1d3dbc74138
+	method = merge
+	cmdver = 0.4.9

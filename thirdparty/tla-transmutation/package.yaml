@@ -1,0 +1,22 @@
+name: tla-transmutation
+version: 0.0.1
+synopsis: Elixir code generation from TLA+ specifications
+description: See README at <https://github.com/gabrielamafra/tla-trasmutation>
+maintainer: Gabriela Mafra <hi@gabrielamafra.dev>
+github: gabrielamafra/tla-trasmutation
+category: Development
+
+ghc-options: -Wall
+
+dependencies:
+  - base >= 4.9 && < 5
+  - split
+  - parsec
+  - casing
+  - extra
+  - mtl
+  - aeson
+
+executable:
+  main: Main.hs
+  source-dirs: .

@@ -1,0 +1,1521 @@
+{
+  "name": "ApalacheIR",
+  "version": "1.0",
+  "description": "https://apalache.informal.systems/docs/adr/005adr-json.html",
+  "modules": [
+    {
+      "kind": "TlaModule",
+      "name": "TrafficSemaphores",
+      "declarations": [
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 4,
+              "column": 10
+            },
+            "to": {
+              "line": 4,
+              "column": 19
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaConstDecl",
+          "name": "SEMAPHORES"
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 3,
+              "column": 10
+            },
+            "to": {
+              "line": 3,
+              "column": 15
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaVarDecl",
+          "name": "colors"
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 3,
+              "column": 18
+            },
+            "to": {
+              "line": 3,
+              "column": 29
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaVarDecl",
+          "name": "next_to_open"
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 6,
+              "column": 1
+            },
+            "to": {
+              "line": 8,
+              "column": 46
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaOperDecl",
+          "name": "TurnGreen",
+          "formalParams": [
+            {
+              "kind": "OperParam",
+              "name": "s",
+              "arity": 0
+            }
+          ],
+          "isRecursive": false,
+          "body": {
+            "source": {
+              "filename": "TrafficSemaphores",
+              "from": {
+                "line": 6,
+                "column": 17
+              },
+              "to": {
+                "line": 8,
+                "column": 46
+              }
+            },
+            "type": "Untyped",
+            "kind": "OperEx",
+            "oper": "AND",
+            "args": [
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 6,
+                    "column": 20
+                  },
+                  "to": {
+                    "line": 6,
+                    "column": 60
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "FORALL3",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 6,
+                        "column": 20
+                      },
+                      "to": {
+                        "line": 6,
+                        "column": 60
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "NameEx",
+                    "name": "s2"
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 6,
+                        "column": 30
+                      },
+                      "to": {
+                        "line": 6,
+                        "column": 39
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "NameEx",
+                    "name": "SEMAPHORES"
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 6,
+                        "column": 43
+                      },
+                      "to": {
+                        "line": 6,
+                        "column": 60
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "EQ",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 6,
+                            "column": 43
+                          },
+                          "to": {
+                            "line": 6,
+                            "column": 52
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "OperEx",
+                        "oper": "FUN_APP",
+                        "args": [
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 6,
+                                "column": 43
+                              },
+                              "to": {
+                                "line": 6,
+                                "column": 48
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "colors"
+                          },
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 6,
+                                "column": 50
+                              },
+                              "to": {
+                                "line": 6,
+                                "column": 51
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "s2"
+                          }
+                        ]
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 6,
+                            "column": 56
+                          },
+                          "to": {
+                            "line": 6,
+                            "column": 60
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "ValEx",
+                        "value": {
+                          "kind": "TlaStr",
+                          "value": "red"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 7,
+                    "column": 19
+                  },
+                  "to": {
+                    "line": 7,
+                    "column": 58
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 7,
+                        "column": 19
+                      },
+                      "to": {
+                        "line": 7,
+                        "column": 25
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "PRIME",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 7,
+                            "column": 19
+                          },
+                          "to": {
+                            "line": 7,
+                            "column": 24
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      }
+                    ]
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 7,
+                        "column": 29
+                      },
+                      "to": {
+                        "line": 7,
+                        "column": 58
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "EXCEPT",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 7,
+                            "column": 30
+                          },
+                          "to": {
+                            "line": 7,
+                            "column": 35
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 7,
+                            "column": 44
+                          },
+                          "to": {
+                            "line": 7,
+                            "column": 57
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "OperEx",
+                        "oper": "TUPLE",
+                        "args": [
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 7,
+                                "column": 46
+                              },
+                              "to": {
+                                "line": 7,
+                                "column": 46
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "s"
+                          }
+                        ]
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 7,
+                            "column": 51
+                          },
+                          "to": {
+                            "line": 7,
+                            "column": 57
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "ValEx",
+                        "value": {
+                          "kind": "TlaStr",
+                          "value": "green"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 8,
+                    "column": 19
+                  },
+                  "to": {
+                    "line": 8,
+                    "column": 46
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "UNCHANGED",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 8,
+                        "column": 29
+                      },
+                      "to": {
+                        "line": 8,
+                        "column": 46
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "TUPLE",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 8,
+                            "column": 32
+                          },
+                          "to": {
+                            "line": 8,
+                            "column": 43
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "next_to_open"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 10,
+              "column": 1
+            },
+            "to": {
+              "line": 12,
+              "column": 47
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaOperDecl",
+          "name": "TurnYellow",
+          "formalParams": [
+            {
+              "kind": "OperParam",
+              "name": "s",
+              "arity": 0
+            }
+          ],
+          "isRecursive": false,
+          "body": {
+            "source": {
+              "filename": "TrafficSemaphores",
+              "from": {
+                "line": 10,
+                "column": 18
+              },
+              "to": {
+                "line": 12,
+                "column": 47
+              }
+            },
+            "type": "Untyped",
+            "kind": "OperEx",
+            "oper": "AND",
+            "args": [
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 10,
+                    "column": 20
+                  },
+                  "to": {
+                    "line": 10,
+                    "column": 38
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 10,
+                        "column": 20
+                      },
+                      "to": {
+                        "line": 10,
+                        "column": 28
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "FUN_APP",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 10,
+                            "column": 20
+                          },
+                          "to": {
+                            "line": 10,
+                            "column": 25
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 10,
+                            "column": 27
+                          },
+                          "to": {
+                            "line": 10,
+                            "column": 27
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "s"
+                      }
+                    ]
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 10,
+                        "column": 32
+                      },
+                      "to": {
+                        "line": 10,
+                        "column": 38
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "ValEx",
+                    "value": {
+                      "kind": "TlaStr",
+                      "value": "green"
+                    }
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 11,
+                    "column": 20
+                  },
+                  "to": {
+                    "line": 11,
+                    "column": 60
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 11,
+                        "column": 20
+                      },
+                      "to": {
+                        "line": 11,
+                        "column": 26
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "PRIME",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 11,
+                            "column": 20
+                          },
+                          "to": {
+                            "line": 11,
+                            "column": 25
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      }
+                    ]
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 11,
+                        "column": 30
+                      },
+                      "to": {
+                        "line": 11,
+                        "column": 60
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "EXCEPT",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 11,
+                            "column": 31
+                          },
+                          "to": {
+                            "line": 11,
+                            "column": 36
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 11,
+                            "column": 45
+                          },
+                          "to": {
+                            "line": 11,
+                            "column": 59
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "OperEx",
+                        "oper": "TUPLE",
+                        "args": [
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 11,
+                                "column": 47
+                              },
+                              "to": {
+                                "line": 11,
+                                "column": 47
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "s"
+                          }
+                        ]
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 11,
+                            "column": 52
+                          },
+                          "to": {
+                            "line": 11,
+                            "column": 59
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "ValEx",
+                        "value": {
+                          "kind": "TlaStr",
+                          "value": "yellow"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 12,
+                    "column": 20
+                  },
+                  "to": {
+                    "line": 12,
+                    "column": 47
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "UNCHANGED",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 12,
+                        "column": 30
+                      },
+                      "to": {
+                        "line": 12,
+                        "column": 47
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "TUPLE",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 12,
+                            "column": 33
+                          },
+                          "to": {
+                            "line": 12,
+                            "column": 44
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "next_to_open"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 14,
+              "column": 1
+            },
+            "to": {
+              "line": 16,
+              "column": 44
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaOperDecl",
+          "name": "TurnRed",
+          "formalParams": [
+            {
+              "kind": "OperParam",
+              "name": "s",
+              "arity": 0
+            }
+          ],
+          "isRecursive": false,
+          "body": {
+            "source": {
+              "filename": "TrafficSemaphores",
+              "from": {
+                "line": 14,
+                "column": 15
+              },
+              "to": {
+                "line": 16,
+                "column": 44
+              }
+            },
+            "type": "Untyped",
+            "kind": "OperEx",
+            "oper": "AND",
+            "args": [
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 14,
+                    "column": 17
+                  },
+                  "to": {
+                    "line": 14,
+                    "column": 36
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 14,
+                        "column": 17
+                      },
+                      "to": {
+                        "line": 14,
+                        "column": 25
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "FUN_APP",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 14,
+                            "column": 17
+                          },
+                          "to": {
+                            "line": 14,
+                            "column": 22
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 14,
+                            "column": 24
+                          },
+                          "to": {
+                            "line": 14,
+                            "column": 24
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "s"
+                      }
+                    ]
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 14,
+                        "column": 29
+                      },
+                      "to": {
+                        "line": 14,
+                        "column": 36
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "ValEx",
+                    "value": {
+                      "kind": "TlaStr",
+                      "value": "yellow"
+                    }
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 15,
+                    "column": 17
+                  },
+                  "to": {
+                    "line": 15,
+                    "column": 54
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 15,
+                        "column": 17
+                      },
+                      "to": {
+                        "line": 15,
+                        "column": 23
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "PRIME",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 15,
+                            "column": 17
+                          },
+                          "to": {
+                            "line": 15,
+                            "column": 22
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      }
+                    ]
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 15,
+                        "column": 27
+                      },
+                      "to": {
+                        "line": 15,
+                        "column": 54
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "EXCEPT",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 15,
+                            "column": 28
+                          },
+                          "to": {
+                            "line": 15,
+                            "column": 33
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "colors"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 15,
+                            "column": 42
+                          },
+                          "to": {
+                            "line": 15,
+                            "column": 53
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "OperEx",
+                        "oper": "TUPLE",
+                        "args": [
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 15,
+                                "column": 44
+                              },
+                              "to": {
+                                "line": 15,
+                                "column": 44
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "s"
+                          }
+                        ]
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 15,
+                            "column": 49
+                          },
+                          "to": {
+                            "line": 15,
+                            "column": 53
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "ValEx",
+                        "value": {
+                          "kind": "TlaStr",
+                          "value": "red"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 16,
+                    "column": 17
+                  },
+                  "to": {
+                    "line": 16,
+                    "column": 44
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "UNCHANGED",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 16,
+                        "column": 27
+                      },
+                      "to": {
+                        "line": 16,
+                        "column": 44
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "TUPLE",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 16,
+                            "column": 30
+                          },
+                          "to": {
+                            "line": 16,
+                            "column": 41
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "next_to_open"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 18,
+              "column": 1
+            },
+            "to": {
+              "line": 18,
+              "column": 64
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaOperDecl",
+          "name": "Init",
+          "formalParams": [
+            
+          ],
+          "isRecursive": false,
+          "body": {
+            "source": {
+              "filename": "TrafficSemaphores",
+              "from": {
+                "line": 18,
+                "column": 9
+              },
+              "to": {
+                "line": 18,
+                "column": 64
+              }
+            },
+            "type": "Untyped",
+            "kind": "OperEx",
+            "oper": "AND",
+            "args": [
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 18,
+                    "column": 9
+                  },
+                  "to": {
+                    "line": 18,
+                    "column": 45
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 18,
+                        "column": 9
+                      },
+                      "to": {
+                        "line": 18,
+                        "column": 14
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "NameEx",
+                    "name": "colors"
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 18,
+                        "column": 18
+                      },
+                      "to": {
+                        "line": 18,
+                        "column": 45
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "FUN_CTOR",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 18,
+                            "column": 40
+                          },
+                          "to": {
+                            "line": 18,
+                            "column": 44
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "ValEx",
+                        "value": {
+                          "kind": "TlaStr",
+                          "value": "red"
+                        }
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 18,
+                            "column": 18
+                          },
+                          "to": {
+                            "line": 18,
+                            "column": 45
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "s"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 18,
+                            "column": 25
+                          },
+                          "to": {
+                            "line": 18,
+                            "column": 34
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "SEMAPHORES"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 18,
+                    "column": 49
+                  },
+                  "to": {
+                    "line": 18,
+                    "column": 64
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "EQ",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 18,
+                        "column": 49
+                      },
+                      "to": {
+                        "line": 18,
+                        "column": 60
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "NameEx",
+                    "name": "next_to_open"
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 18,
+                        "column": 64
+                      },
+                      "to": {
+                        "line": 18,
+                        "column": 64
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "ValEx",
+                    "value": {
+                      "kind": "TlaInt",
+                      "value": 0
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "source": {
+            "filename": "TrafficSemaphores",
+            "from": {
+              "line": 20,
+              "column": 1
+            },
+            "to": {
+              "line": 20,
+              "column": 73
+            }
+          },
+          "type": "Untyped",
+          "kind": "TlaOperDecl",
+          "name": "Next",
+          "formalParams": [
+            
+          ],
+          "isRecursive": false,
+          "body": {
+            "source": {
+              "filename": "TrafficSemaphores",
+              "from": {
+                "line": 20,
+                "column": 9
+              },
+              "to": {
+                "line": 20,
+                "column": 73
+              }
+            },
+            "type": "Untyped",
+            "kind": "OperEx",
+            "oper": "EXISTS3",
+            "args": [
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 20,
+                    "column": 9
+                  },
+                  "to": {
+                    "line": 20,
+                    "column": 73
+                  }
+                },
+                "type": "Untyped",
+                "kind": "NameEx",
+                "name": "s"
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 20,
+                    "column": 18
+                  },
+                  "to": {
+                    "line": 20,
+                    "column": 27
+                  }
+                },
+                "type": "Untyped",
+                "kind": "NameEx",
+                "name": "SEMAPHORES"
+              },
+              {
+                "source": {
+                  "filename": "TrafficSemaphores",
+                  "from": {
+                    "line": 20,
+                    "column": 31
+                  },
+                  "to": {
+                    "line": 20,
+                    "column": 73
+                  }
+                },
+                "type": "Untyped",
+                "kind": "OperEx",
+                "oper": "OR",
+                "args": [
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 20,
+                        "column": 31
+                      },
+                      "to": {
+                        "line": 20,
+                        "column": 59
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "OR",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 20,
+                            "column": 31
+                          },
+                          "to": {
+                            "line": 20,
+                            "column": 42
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "OperEx",
+                        "oper": "OPER_APP",
+                        "args": [
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 20,
+                                "column": 31
+                              },
+                              "to": {
+                                "line": 20,
+                                "column": 42
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "TurnGreen"
+                          },
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 20,
+                                "column": 41
+                              },
+                              "to": {
+                                "line": 20,
+                                "column": 41
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "s"
+                          }
+                        ]
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 20,
+                            "column": 47
+                          },
+                          "to": {
+                            "line": 20,
+                            "column": 59
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "OperEx",
+                        "oper": "OPER_APP",
+                        "args": [
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 20,
+                                "column": 47
+                              },
+                              "to": {
+                                "line": 20,
+                                "column": 59
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "TurnYellow"
+                          },
+                          {
+                            "source": {
+                              "filename": "TrafficSemaphores",
+                              "from": {
+                                "line": 20,
+                                "column": 58
+                              },
+                              "to": {
+                                "line": 20,
+                                "column": 58
+                              }
+                            },
+                            "type": "Untyped",
+                            "kind": "NameEx",
+                            "name": "s"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "source": {
+                      "filename": "TrafficSemaphores",
+                      "from": {
+                        "line": 20,
+                        "column": 64
+                      },
+                      "to": {
+                        "line": 20,
+                        "column": 73
+                      }
+                    },
+                    "type": "Untyped",
+                    "kind": "OperEx",
+                    "oper": "OPER_APP",
+                    "args": [
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 20,
+                            "column": 64
+                          },
+                          "to": {
+                            "line": 20,
+                            "column": 73
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "TurnRed"
+                      },
+                      {
+                        "source": {
+                          "filename": "TrafficSemaphores",
+                          "from": {
+                            "line": 20,
+                            "column": 72
+                          },
+                          "to": {
+                            "line": 20,
+                            "column": 72
+                          }
+                        },
+                        "type": "Untyped",
+                        "kind": "NameEx",
+                        "name": "s"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
