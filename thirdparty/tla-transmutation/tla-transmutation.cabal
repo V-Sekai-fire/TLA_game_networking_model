@@ -1,0 +1,50 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.38.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           tla-transmutation
+version:        0.0.1
+synopsis:       Elixir code generation from TLA+ specifications
+description:    See README at <https://github.com/gabrielamafra/tla-trasmutation>
+category:       Development
+homepage:       https://github.com/gabrielamafra/tla-trasmutation#readme
+bug-reports:    https://github.com/gabrielamafra/tla-trasmutation/issues
+maintainer:     Gabriela Mafra <hi@gabrielamafra.dev>
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/gabrielamafra/tla-trasmutation
+
+executable tla-transmutation
+  main-is: Main.hs
+  other-modules:
+      BlackboxTestGenerator
+      CodeGenerator
+      ConfigParser
+      DocHandler
+      Elixir
+      Head
+      Helpers
+      JSONParser
+      Math
+      Parser
+      Snippets
+      WhiteboxTestGenerator
+      Paths_tla_transmutation
+  hs-source-dirs:
+      ./
+  ghc-options: -Wall
+  build-depends:
+      aeson
+    , base >=4.9 && <5
+    , casing
+    , extra
+    , mtl
+    , parsec
+    , split
+  default-language: Haskell2010
