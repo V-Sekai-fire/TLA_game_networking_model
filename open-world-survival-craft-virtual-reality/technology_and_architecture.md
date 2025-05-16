@@ -24,7 +24,7 @@ To address the aforementioned challenges, the following MIT-compatible (or simil
 - **Tiered State Management:**
   1.  **Ultra-Hot Data (In-Memory Elixir Processes):** For sub-20ms critical loops, manage state directly in Elixir GenServers/Agents. This state is ultimately persisted to FoundationDB.
   2.  **Warm Data (Cached in Regional Elixir Processes):** For consistent, low-latency operations for specific game systems or regions, frequently accessed data can be cached within regional Elixir processes. This state is read from and ultimately persisted to FoundationDB.
-  3.  **Cold/Persistent Data (FoundationDB):** The authoritative, globally consistent, and durable store for all game state.
+  3.  **Cold/Persistent Data (FoundationDB):** The authoritative, globally consistent, and durable store for all game state that needs to be readily accessible.
 - **Sharding/Regionalization:** The game world can be sharded, with different sets of Elixir processes (potentially managing cached data regionally) responsible for distinct areas, all persisting to the global FoundationDB instance.
 - **Asynchronous Operations:** For non-critical updates or background tasks, leverage Elixir's message passing to offload work and maintain responsiveness.
 
