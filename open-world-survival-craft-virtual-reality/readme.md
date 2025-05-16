@@ -1,40 +1,33 @@
 # Readme
 
-The core problem you're tackling for **V-Sekai** is: **How to design and implement a backend system capable of supporting an Open World Survival Craft (OWSC) game with the massive scale, deep persistence, and complex player-driven dynamics envisioned for V-Sekai, while simultaneously meeting the ultra-low latency and high immersion demands of Virtual Reality.**
+This project outlines the backend design for V-Sekai, an Open World Survival Craft (OWSC) game with a focus on massive scale, deep persistence, and low-latency VR immersion.
 
-This breaks down into several interconnected challenges:
+## Core Problem & Challenges
 
-1.  **Immense Data Volume & Granularity (V-Sekai Scale):** Persistently storing and managing the state of potentially millions of player-built structures, vehicles, resources, and items across a vast, multi-region world. Each entity can have a detailed and frequently changing state, and VR's tangibility might increase the expectation for fine-grained persistence within the V-Sekai world.
-2.  **Extreme Transactional Throughput & Concurrency (V-Sekai Scale):** Handling many hundreds to thousands of concurrent player actions per second globally (logistics, building, combat, resource changes). These actions all require atomic and consistent updates to the persistent V-Sekai world state, often involving shared resources.
-3.  **Ultra-Low Latency for VR Immersion in V-Sekai:** Ensuring that player interactions within V-Sekai provide immediate feedback (ideally sub-20ms for critical loops) to maintain presence and avoid VR sickness. This is despite the underlying complexity and scale of data operations needed to support the V-Sekai simulation.
-4.  **Strong Data Consistency & Integrity for V-Sekai:** Guaranteeing that the shared V-Sekai world state is accurate and consistent for all players, especially during collaborative or contentious interactions, over campaigns that can last for weeks or months. Data corruption or desynchronization is highly detrimental.
-5.  **Scalability & Availability for V-Sekai:** Designing a system that can reliably scale to support thousands of concurrent VR players in V-Sekai and remain highly available throughout long-duration game worlds.
+[Details in Problem and Challenges](./problem_and_challenges.md)
 
 ## Proposed Technology Stack & Architectural Approach
 
-To address the aforementioned challenges, the following MIT-compatible (or similarly permissive, e.g., Apache 2.0, BSD) technology stack and architectural considerations are proposed:
+[Details in Technology and Architecture](./technology_and_architecture.md)
 
-**Core Backend Technologies:**
+## Explain the project in five levels of complexity
 
-- **Elixir (Apache 2.0 License):**
-  - Leverage OTP (Open Telecom Platform) for massive concurrency, fault tolerance, and distributed state management.
-  - Use GenServers/Agents for managing individual player states, game entities, or regional logic, enabling high responsiveness for critical interactions.
-  - Addresses: _Extreme Transactional Throughput & Concurrency_, _Ultra-Low Latency (for in-memory operations)_, _Scalability & Availability_.
-- **Phoenix Framework (MIT License):**
-  - Utilize Phoenix Channels for ultra-low latency, real-time bidirectional communication between Godot clients and the Elixir backend.
-  - Addresses: _Ultra-Low Latency for VR Immersion_.
-- **FoundationDB (Apache 2.0 License) with `ecto_foundationdb` (Apache 2.0 License):**
-  - Serve as the primary persistent datastore. FoundationDB offers distributed, transactional key-value storage with strong ACID guarantees (strict serializability).
-  - Ecto provides a powerful and familiar way to model, query, and transact with this data from Elixir.
-  - Addresses: _Immense Data Volume & Granularity_, _Extreme Transactional Throughput & Concurrency_, _Strong Data Consistency & Integrity_, _Scalability & Availability_. The atomic `ProcessInputsAndUpdateWorld` transaction described in `ExtendedWorldState.tla` can be directly implemented using FoundationDB's transactional capabilities.
+**Level 1: To a Child**
 
-**Architectural Principles:**
+Imagine we're building a giant, magical LEGO world online where many people can play together in virtual reality, like wearing special goggles. My job is to make sure that when you build a cool LEGO castle, it stays there, and when your friend opens a door in your castle, you see it open right away, super fast! We need special computer magic to remember everything everyone builds and to make sure it all works smoothly even if thousands of kids are playing at the same time.
 
-- **Tiered State Management:**
-  1.  **Ultra-Hot Data (In-Memory Elixir Processes):** For sub-20ms critical loops, manage state directly in Elixir GenServers/Agents. This state is ultimately persisted to FoundationDB.
-  2.  **Warm Data (Cached in Regional Elixir Processes):** For consistent, low-latency operations for specific game systems or regions, frequently accessed data can be cached within regional Elixir processes. This state is read from and ultimately persisted to FoundationDB.
-  3.  **Cold/Persistent Data (FoundationDB):** The authoritative, globally consistent, and durable store for all game state.
-- **Sharding/Regionalization:** The game world can be sharded, with different sets of Elixir processes (potentially managing cached data regionally) responsible for distinct areas, all persisting to the global FoundationDB instance.
-- **Asynchronous Operations:** For non-critical updates or background tasks, leverage Elixir's message passing to offload work and maintain responsiveness.
+**Level 2: To a Teenager**
 
-This combination aims to provide the necessary tools to build a backend that is scalable, resilient, consistent, and performant enough for the ambitious goals of V-Sekai, while adhering to permissive licensing. The system design can mirror the state transitions and data structures (like `worldEntities`, `entityState`, `playerInputs`) defined in `ExtendedWorldState.tla`.
+We're designing the server-side backend for a massive multiplayer online VR game. Think of something like Minecraft or Valheim, but in VR, and potentially way bigger, with a persistent world where everything players do sticks around. The challenge is handling tons of players interacting in real-time – building, crafting, fighting – all while keeping the VR experience super smooth and responsive, because lag in VR is a big problem. We need to store a huge amount of data about the game world and player actions, and process it all very quickly and reliably.
+
+**Level 3: To an Undergrad (Computer Science)**
+
+We're architecting a distributed backend system for an Open World Survival Craft game with VR support, focusing on high scalability, strong data consistency, and low-latency communication. The core problem involves managing persistent world state for a large number of concurrent users, where actions like building, resource gathering, and entity interactions must be transactional and reflected globally with minimal delay. We're looking at a technology stack likely involving Elixir/OTP for its concurrency and fault tolerance, WebRTC Data Channels for real-time messaging over UDP to VR clients, and a distributed database like FoundationDB for its ACID guarantees and ability to handle large-scale transactional workloads. The architecture will likely employ tiered state management (hot in-memory state in Elixir, warm cached state, and cold persistent state in FoundationDB) and sharding to distribute load.
+
+**Level 4: To a Grad Student (Distributed Systems / Game Engineering)**
+
+The project aims to define a backend architecture for a V-Sekai, a large-scale, persistent OWSC VR game, addressing challenges in distributed state management, transactional consistency at scale, and sub-20ms latency for critical VR interaction loops. We're proposing a stack centered around Elixir/OTP for its actor model and soft real-time capabilities, leveraging WebRTC Data Channels for client-server communication over UDP. The persistence layer will be FoundationDB, chosen for its strict serializability and proven scalability, accessed via an Ecto adapter. Key architectural patterns include tiered state management (GenServers for ultra-hot state, potentially regional caching for warm state, and FoundationDB as the source of truth), and world sharding where Elixir processes manage distinct regions while FoundationDB provides a unified global view. The goal is to ensure that operations like `ProcessInputsAndUpdateWorld`, as conceptualized in formal models like TLA+, can be implemented atomically and efficiently across the distributed system, supporting a deeply persistent and player-driven emergent world.
+
+**Level 5: To a Colleague (Expert in Backend/Distributed Systems)**
+
+We're tackling the backend for V-Sekai, an OWSC VR title. The core constraints are massive scale (potentially millions of fine-grained entities), deep persistence (weeks/months long campaigns), and VR's stringent low-latency requirements (sub-20ms for critical loops). The proposed solution leverages Elixir/OTP for its concurrency model (GenServers managing entity/player state or regional logic) and WebRTC Data Channels for low-latency, bidirectional client comms over UDP. FoundationDB is the cornerstone for persistence, providing strict serializability for complex, multi-key transactions essential for consistent world state updates (e.g., atomic `ProcessInputsAndUpdateWorld` from our TLA+ spec). The architecture emphasizes tiered state: Elixir processes for ultra-hot data, potentially regional caches (backed by FDB) for warm data, and FDB as the cold, authoritative store. We'll use sharding at the Elixir application layer, with FoundationDB handling the underlying distributed storage and transactional integrity across shards. The primary focus is on achieving strong consistency and high availability without compromising the low-latency demands of VR, ensuring that player interactions with the persistent, dynamic world are immediate and reliable. We're aiming for a design that can scale horizontally and maintain integrity under high concurrent load, with permissive licensing (Apache 2.0, MIT) for all core components.
