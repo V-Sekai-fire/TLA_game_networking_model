@@ -1,31 +1,63 @@
 # Proposed Technology Stack & Architectural Approach
 
-To address the aforementioned challenges, the following MIT-compatible (or similarly permissive, e.g., Apache 2.0, BSD) technology stack and architectural considerations are proposed:
+Our technical approach leverages Elixir for concurrent backend logic, WebRTC for real-time communication, and FoundationDB for persistent data storage. This stack supports highly responsive and scalable gameplay. Architectural principles include tiered state management (in-memory for speed, database for persistence), world sharding for scalability, and asynchronous operations for responsiveness.
 
-**Core Backend Technologies:**
+## Illustrative Game Problem: Cooperative Ritual - Awakening an Ancient Shrine
 
-- **Elixir (Apache 2.0 License):**
-  - Leverage OTP (Open Telecom Platform) for massive concurrency, fault tolerance, and distributed state management.
-  - Use GenServers/Agents for managing individual player states, game entities, or regional logic, enabling high responsiveness for critical interactions.
-  - Addresses: _Extreme Transactional Throughput & Concurrency_, _Ultra-Low Latency (for in-memory operations)_, _Scalability & Availability_.
-- **WebRTC Data Channels (UDP-based via DTLS-SRTP):**
-  - Provide low-latency, real-time, bidirectional communication suitable for game clients (Godot) and web-based tooling.
-  - Data channels can be configured for unreliable/unordered (for game state) or reliable/ordered (for critical messages, admin tasks) transport over UDP.
-  - Godot Engine has built-in WebRTC support. Elixir can act as a WebRTC peer and handle the signaling process (which could be a lightweight WebSocket setup, potentially still involving parts of Phoenix if desired for robustness for signaling, or a simpler custom solution).
-  - Native browser support makes it suitable for web-based admin and community management tools.
-  - Addresses: _Ultra-Low Latency for VR Immersion_, flexible real-time data transport.
-- **FoundationDB (Apache 2.0 License) with `ecto_foundationdb` (Apache 2.0 License):**
-  - Serve as the primary persistent datastore. FoundationDB offers distributed, transactional key-value storage with strong ACID guarantees (strict serializability).
-  - Ecto provides a powerful and familiar way to model, query, and transact with this data from Elixir.
-  - Addresses: _Immense Data Volume & Granularity_, _Extreme Transactional Throughput & Concurrency_, _Strong Data Consistency & Integrity_, _Scalability & Availability_. The atomic `ProcessInputsAndUpdateWorld` transaction described in `ExtendedWorldState.tla` can be directly implemented using FoundationDB's transactional capabilities.
+This scenario showcases how our tech supports complex, cooperative VR gameplay.
 
-**Architectural Principles:**
+**Scenario:** Two players in VR discover an Ancient Shrine. Their goal is to perform a cooperative ritual to awaken it and receive a "Divine Blessing." This involves:
 
-- **Tiered State Management:**
-  1.  **Ultra-Hot Data (In-Memory Elixir Processes):** For sub-20ms critical loops, manage state directly in Elixir GenServers/Agents. This state is ultimately persisted to FoundationDB.
-  2.  **Warm Data (Cached in Regional Elixir Processes):** For consistent, low-latency operations for specific game systems or regions, frequently accessed data can be cached within regional Elixir processes. This state is read from and ultimately persisted to FoundationDB.
-  3.  **Cold/Persistent Data (FoundationDB):** The authoritative, globally consistent, and durable store for all game state that needs to be readily accessible.
-- **Sharding/Regionalization:** The game world can be sharded, with different sets of Elixir processes (potentially managing cached data regionally) responsible for distinct areas, all persisting to the global FoundationDB instance.
-- **Asynchronous Operations:** For non-critical updates or background tasks, leverage Elixir's message passing to offload work and maintain responsiveness.
+- **Expressive Avatars:** Players use VRM avatars that mirror their movements.
+- **Shrine Entity:** The Shrine has states like `ActivationProgress`, `required_offerings_met`, and `ritual_phase`.
+- **Offering Items:** Players gather/craft items like "Sunstone Shards" to offer.
 
-This combination aims to provide the necessary tools to build a backend that is scalable, resilient, consistent, and performant enough for the ambitious goals of V-Sekai, while adhering to permissive licensing. The system design can mirror the state transitions and data structures (like `worldEntities`, `entityState`, `playerInputs`) defined in `ExtendedWorldState.tla`.
+## Player Actions & Social VR Elements:
+
+### Offering & Initial Activation:
+
+- Players find the Shrine and identify the need for offerings.
+- They select items from their VR inventory and physically place them. An RPC `place_offering(...)` is sent.
+- The Elixir backend validates offerings against the Shrine's requirements (stored in FoundationDB). If valid, `required_offerings_met` becomes true. Visual feedback is synchronized to all clients.
+
+### Synchronized Ritual Performance:
+
+- Players move to ritual spots. An RPC `begin_ritual_performance(...)` triggers animations.
+- Players perform synchronized physical movements (e.g., rhythmic hand raising, tracing patterns).
+- Clients send `controller_motion_data` via WebRTC. The Elixir backend processes these streams, evaluating synchronization and correctness to update `ActivationProgress`.
+- As `ActivationProgress` increases, Shrine visuals/audio intensify, and avatar effects (e.g., shaders, particles) enhance immersion, all synchronized from the server.
+
+### Shrine Awakening & Blessing Bestowed:
+
+- Reaching `MaxActivation` triggers a climactic event.
+- The server sends an RPC `shrine_activated_apply_blessing(...)`.
+- A "Divine Blessing" (e.g., "+20% gathering speed") is applied to player data (managed by Elixir, persisted in FoundationDB).
+- Client UIs update. Poor performance might result in weaker blessings or failure. The Shrine may enter a cooldown.
+
+## Technical Solution Highlights:
+
+### Real-time Logic & State (Elixir & OTP):
+
+- Elixir GenServers manage individual Shrine states and player interactions (RPCs, motion data).
+- Handles complex logic: validating offerings, evaluating synchronized movements, calculating `ActivationProgress`.
+- OTP ensures fault tolerance for uninterrupted gameplay.
+- Player state (inventory, blessings) is managed authoritatively by Elixir.
+
+### Persistent & Consistent Storage (FoundationDB):
+
+- Shrine state (`ActivationProgress`, `required_offerings_met`), player progression (inventories, blessings), and ritual definitions are stored.
+- ACID transactions ensure atomic operations (e.g., consuming offerings, granting blessings).
+
+### Low-Latency Communication (WebRTC):
+
+- High-frequency `controller_motion_data` is sent efficiently.
+- Critical state changes and visual triggers are broadcast reliably, ensuring a synchronized experience.
+- Elixir manages WebRTC signaling.
+
+### Tiered State Management in Action:
+
+- **Ultra-Hot (Elixir In-Memory):** Active ritual data (`ActivationProgress`, motion data queues) for sub-millisecond access.
+- **Warm (Elixir Cache):** Frequently accessed regional shrine definitions.
+- **Cold (FoundationDB):** Authoritative store for all persistent game data.
+
+This approach allows for rich, interactive, and scalable social VR experiences like the cooperative ritual, directly leveraging the strengths of the chosen technologies.
