@@ -29,6 +29,22 @@ CONSTANTS
     
     BASELINE_ENTITIES,         (*  Initial entity count for the root cell *)
     
+    (* Model Testing Constants - Aggressive limits to force failures during model checking *)
+    QUEUE_CAPACITY_TEST_LIMIT,          (*  Aggressive queue limit to force failure under exponential load *)
+    ENTITY_CAPACITY_TEST_LIMIT,         (*  Lower entity limit to see geometric growth effects sooner *)
+    MIN_ENTITIES_FOR_GROWTH,            (*  Minimum entities threshold to start geometric growth *)
+    GEOMETRIC_GROWTH_RATE_PERCENT,      (*  Percentage growth rate for geometric entity increase *)
+    GEOMETRIC_GROWTH_DIVISOR,           (*  Divisor for integer arithmetic in growth calculation *)
+    
+    (* Zipfian Distribution Constants for task generation weights *)
+    ZIPF_MOVEMENT_WEIGHT,               (*  Weight for movement updates (most frequent) *)
+    ZIPF_COMMON_WEIGHT,                 (*  Weight for common tasks *)
+    ZIPF_NETWORK_SYNC_WEIGHT,           (*  Weight for network sync updates *)
+    ZIPF_PHYSICS_WEIGHT,                (*  Weight for physics updates *)
+    ZIPF_INTERACTION_WEIGHT,            (*  Weight for interaction events *)
+    ZIPF_RARE_WEIGHT,                   (*  Weight for rare events *)
+    ZIPF_WORLD_LOAD_WEIGHT,             (*  Weight for world loading (least frequent but expensive) *)
+    
     (* WebRTC Channel Configuration - Individual channel counts per delivery mode *)
     RELIABLE_SEQUENCED_CHANNEL_COUNT,       (*  Number of reliable sequenced channels *)
     RELIABLE_UNSEQUENCED_CHANNEL_COUNT,     (*  Number of reliable unsequenced channels *)
@@ -65,6 +81,18 @@ ASSUME A_PositiveConstants ==
     /\ NETWORK_BYTES_WORLD_LOAD \in Nat \ {0}
     /\ NETWORK_BYTES_NETWORK_SYNC \in Nat \ {0}
     /\ NETWORK_BYTES_PHYSICS \in Nat \ {0}
+    /\ QUEUE_CAPACITY_TEST_LIMIT \in Nat \ {0}
+    /\ ENTITY_CAPACITY_TEST_LIMIT \in Nat \ {0}
+    /\ MIN_ENTITIES_FOR_GROWTH \in Nat \ {0}
+    /\ GEOMETRIC_GROWTH_RATE_PERCENT \in Nat \ {0}
+    /\ GEOMETRIC_GROWTH_DIVISOR \in Nat \ {0}
+    /\ ZIPF_MOVEMENT_WEIGHT \in Nat \ {0}
+    /\ ZIPF_COMMON_WEIGHT \in Nat \ {0}
+    /\ ZIPF_NETWORK_SYNC_WEIGHT \in Nat \ {0}
+    /\ ZIPF_PHYSICS_WEIGHT \in Nat \ {0}
+    /\ ZIPF_INTERACTION_WEIGHT \in Nat \ {0}
+    /\ ZIPF_RARE_WEIGHT \in Nat \ {0}
+    /\ ZIPF_WORLD_LOAD_WEIGHT \in Nat \ {0}
 
 ASSUME A_LogicalConstraints ==
     /\ DB_OPS_RARE >= DB_OPS_COMMON
@@ -184,7 +212,7 @@ GetChannelForTaskType(task_type) ==
 
 (* Invariant to test queue capacity limits - model checking will fail when queue gets too long *)
 QueueCapacityInvariant ==
-    Len(cell_data.requestQueue) <= 15  (* Aggressive limit to force failure under exponential load *)
+    Len(cell_data.requestQueue) <= QUEUE_CAPACITY_TEST_LIMIT
 
 (* WebRTC Channel Saturation Invariant - Tests head-of-line blocking mitigation *)
 WebRTCChannelSaturationInvariant ==
@@ -196,7 +224,7 @@ WebRTCChannelSaturationInvariant ==
 
 (* Invariant to test entity growth limits *)
 EntityCapacityInvariant ==
-    cell_data.numEntities <= 100  (* Lower entity limit to see geometric growth effects sooner *)
+    cell_data.numEntities <= ENTITY_CAPACITY_TEST_LIMIT
 
 (* Overload management invariant - ensures system responds to overload conditions *)
 OverloadManagementInvariant ==
@@ -255,10 +283,9 @@ GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
     /\ cell_data.numEntities < MAX_ENTITIES_PER_CELL
     /\ LET current_entities == cell_data.numEntities
            (* True geometric growth: next = current * growth_rate *)
-           (* Growth rate of 1.2 means 20% increase each time *)
-           growth_rate == 20  (* Multiply by 1.2, using integer math: new = old + (old * 2) / 10 *)
-           geometric_increment == IF current_entities < 5 THEN 1  (* Minimum growth to get started *)
-                                 ELSE (current_entities * 2) \div 10  (* 20% of current population *)
+           (* Growth rate configured via GEOMETRIC_GROWTH_RATE_PERCENT *)
+           geometric_increment == IF current_entities < MIN_ENTITIES_FOR_GROWTH THEN 1  (* Minimum growth to get started *)
+                                 ELSE (current_entities * GEOMETRIC_GROWTH_RATE_PERCENT) \div GEOMETRIC_GROWTH_DIVISOR  (* Configurable percentage growth *)
            actual_increment == IF geometric_increment < 1 THEN 1 ELSE geometric_increment
        IN AddEntitiesToCell(actual_increment)
 
@@ -424,18 +451,26 @@ SendRareEvent ==
     SendToReliableSequenced(NETWORK_BYTES_RARE)
 
 (* Enhanced Zipfian-weighted task generation that uses WebRTC channels *)
+(* Uses configurable weights instead of magic numbers for better maintainability *)
 GenerateZipfianTaskActivity ==
-    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) - Uses Unreliable Sequenced *)
-    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) *)
-    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) *)
-    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) *)
-    \/ SendCommonUpdate                  (* Rank 2: Common (20% of tasks) - Uses Unreliable Unsequenced *)
-    \/ SendCommonUpdate                  (* Rank 2: Common (20% of tasks) *)
-    \/ SendNetworkSyncUpdate             (* Rank 3: Moderate (15% of tasks) - Uses Reliable Unsequenced *)
-    \/ SendPhysicsUpdate                 (* Rank 4: Less common (10% of tasks) - Uses Unreliable Sequenced *)
-    \/ SendInteractionEvent              (* Rank 5: Uncommon (8% of tasks) - Uses Reliable Sequenced *)
-    \/ SendRareEvent                     (* Rank 6: Rare (5% of tasks) - Uses Reliable Sequenced *)
-    \/ SendWorldStateUpdate              (* Rank 7: Very rare but expensive (2% of tasks) - Uses Reliable Unsequenced *)
+    \* Movement updates (highest frequency - ZIPF_MOVEMENT_WEIGHT occurrences)
+    \/ /\ ZIPF_MOVEMENT_WEIGHT >= 1 /\ SendMovementUpdate
+    \/ /\ ZIPF_MOVEMENT_WEIGHT >= 2 /\ SendMovementUpdate
+    \/ /\ ZIPF_MOVEMENT_WEIGHT >= 3 /\ SendMovementUpdate
+    \/ /\ ZIPF_MOVEMENT_WEIGHT >= 4 /\ SendMovementUpdate
+    \* Common updates (ZIPF_COMMON_WEIGHT occurrences)
+    \/ /\ ZIPF_COMMON_WEIGHT >= 1 /\ SendCommonUpdate
+    \/ /\ ZIPF_COMMON_WEIGHT >= 2 /\ SendCommonUpdate
+    \* Network sync updates (ZIPF_NETWORK_SYNC_WEIGHT occurrences)
+    \/ /\ ZIPF_NETWORK_SYNC_WEIGHT >= 1 /\ SendNetworkSyncUpdate
+    \* Physics updates (ZIPF_PHYSICS_WEIGHT occurrences)
+    \/ /\ ZIPF_PHYSICS_WEIGHT >= 1 /\ SendPhysicsUpdate
+    \* Interaction events (ZIPF_INTERACTION_WEIGHT occurrences)
+    \/ /\ ZIPF_INTERACTION_WEIGHT >= 1 /\ SendInteractionEvent
+    \* Rare events (ZIPF_RARE_WEIGHT occurrences)
+    \/ /\ ZIPF_RARE_WEIGHT >= 1 /\ SendRareEvent
+    \* World state updates (ZIPF_WORLD_LOAD_WEIGHT occurrences)
+    \/ /\ ZIPF_WORLD_LOAD_WEIGHT >= 1 /\ SendWorldStateUpdate
 
 Next ==
     \/ GenerateZipfianTaskActivity       (* Primary load generator - sends to WebRTC channels *)
