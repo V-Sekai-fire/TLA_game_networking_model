@@ -80,13 +80,8 @@ GenerateNetworkSyncActivity ==
 GeneratePhysicsActivity ==
     EnqueueTask(TaskImpact_Physics)
 
-GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
-    LET current_entities == cell_data.numEntities
-        growth_factor == IF current_entities = 0 THEN 5 
-                        ELSE IF current_entities < 5 THEN current_entities * 3
-                        ELSE IF current_entities < 20 THEN current_entities * 2
-                        ELSE current_entities  (*  Double the current entities for aggressive growth *)
-    IN AddEntitiesToCell(growth_factor)
+GenerateEntityArrival == (*  Action to increase numEntities linearly *)
+    AddEntitiesToCell(5)  (*  Add 5 entities per arrival event for linear growth *)
 
 (*  --- Action to simulate cell processing its queue --- *)
 ProcessCellWork ==
