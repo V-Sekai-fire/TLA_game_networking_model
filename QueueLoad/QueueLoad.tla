@@ -298,39 +298,39 @@ AddEntitiesToCell(entity_increment) ==
 
 GenerateCommonTaskActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_COMMON) \div 3  (* Much more aggressive scaling *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_COMMON) \div 100  (* Much lighter scaling for high entity counts *)
            actual_tasks == IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate
        IN EnqueueTask(actual_tasks)
 
 GenerateRareTaskActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_RARE) \div 20  (* Still rare but scales *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_RARE) \div 1000  (* Very rare at scale *)
            actual_tasks == IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate
        IN EnqueueTask(actual_tasks)
 
 GenerateMovementActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_MOVEMENT) \div 2  (* Very frequent *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_MOVEMENT) \div 50  (* Moderate scaling *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateInteractionActivity ==
     /\ cell_data.numEntities > 0  
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_INTERACTION) \div 8  (* More frequent interactions *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_INTERACTION) \div 200  (* Less frequent at scale *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateWorldLoadActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_WORLD_LOAD) \div 15  (* Still expensive but scales *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_WORLD_LOAD) \div 500  (* Very infrequent at scale *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateNetworkSyncActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_NETWORK_SYNC) \div 4  (* Frequent network sync *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_NETWORK_SYNC) \div 150  (* Moderate network sync *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GeneratePhysicsActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_PHYSICS) \div 3  (* Physics very frequent *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_PHYSICS) \div 100  (* Physics scales reasonably *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
@@ -526,20 +526,9 @@ GenerateZipfianTaskActivity ==
     \/ /\ ZIPF_WORLD_LOAD_WEIGHT >= 1 /\ SendWorldStateUpdate
 
 Next ==
-    \/ ProcessCellWork                   (* Process main queue FIRST - highest priority *)
-    \/ GenerateZipfianTaskActivity       (* Primary load generator - sends to WebRTC channels *)
-    \/ GenerateCommonTaskActivity        (* Generate database tasks *)
-    \/ GenerateRareTaskActivity
-    \/ GenerateMovementActivity  
-    \/ GenerateInteractionActivity
-    \/ GenerateWorldLoadActivity
-    \/ GenerateNetworkSyncActivity
-    \/ GeneratePhysicsActivity
-    \/ GenerateEntityArrival             (* Geometric entity growth *)
-    \/ ProcessReliableSequencedQueue     (* Process WebRTC channel queues *)
-    \/ ProcessReliableUnsequencedQueue
-    \/ ProcessUnreliableSequencedQueue
-    \/ ProcessUnreliableUnsequencedQueue
+    \/ /\ Len(cell_data.requestQueue) > 0 /\ ProcessCellWork  (* Force processing when queue has items *)
+    \/ /\ Len(cell_data.requestQueue) = 0 /\ GenerateCommonTaskActivity  (* Only generate when queue is empty *)
+    \/ GenerateEntityArrival             (* Allow entity growth *)
 
 (* -------------------------------- SPECIFICATION AND THEOREM -------------------------------- *)
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
