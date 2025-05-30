@@ -29,9 +29,7 @@ CONSTANTS
     
     BASELINE_ENTITIES,         (*  Initial entity count for the root cell *)
     
-    (* Model Testing Constants - Aggressive limits to force failures during model checking *)
-    QUEUE_CAPACITY_TEST_LIMIT,          (*  Aggressive queue limit to force failure under exponential load *)
-    ENTITY_CAPACITY_TEST_LIMIT,         (*  Lower entity limit to see geometric growth effects sooner *)
+    (* Model Testing Constants - Growth and distribution parameters *)
     MIN_ENTITIES_FOR_GROWTH,            (*  Minimum entities threshold to start geometric growth *)
     GEOMETRIC_GROWTH_RATE_PERCENT,      (*  Percentage growth rate for geometric entity increase *)
     GEOMETRIC_GROWTH_DIVISOR,           (*  Divisor for integer arithmetic in growth calculation *)
@@ -81,8 +79,6 @@ ASSUME A_PositiveConstants ==
     /\ NETWORK_BYTES_WORLD_LOAD \in Nat \ {0}
     /\ NETWORK_BYTES_NETWORK_SYNC \in Nat \ {0}
     /\ NETWORK_BYTES_PHYSICS \in Nat \ {0}
-    /\ QUEUE_CAPACITY_TEST_LIMIT \in Nat \ {0}
-    /\ ENTITY_CAPACITY_TEST_LIMIT \in Nat \ {0}
     /\ MIN_ENTITIES_FOR_GROWTH \in Nat \ {0}
     /\ GEOMETRIC_GROWTH_RATE_PERCENT \in Nat \ {0}
     /\ GEOMETRIC_GROWTH_DIVISOR \in Nat \ {0}
@@ -212,7 +208,7 @@ GetChannelForTaskType(task_type) ==
 
 (* Invariant to test queue capacity limits - model checking will fail when queue gets too long *)
 QueueCapacityInvariant ==
-    Len(cell_data.requestQueue) <= QUEUE_CAPACITY_TEST_LIMIT
+    Len(cell_data.requestQueue) <= MAX_QUEUE_LENGTH_PER_CELL
 
 (* WebRTC Channel Saturation Invariant - Tests head-of-line blocking mitigation *)
 WebRTCChannelSaturationInvariant ==
@@ -224,7 +220,7 @@ WebRTCChannelSaturationInvariant ==
 
 (* Invariant to test entity growth limits *)
 EntityCapacityInvariant ==
-    cell_data.numEntities <= ENTITY_CAPACITY_TEST_LIMIT
+    cell_data.numEntities <= MAX_ENTITIES_PER_CELL
 
 (* Overload management invariant - ensures system doesn't exceed capacity limits *)
 OverloadManagementInvariant ==
