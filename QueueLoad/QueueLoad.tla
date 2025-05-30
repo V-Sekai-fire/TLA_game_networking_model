@@ -121,6 +121,11 @@ ReliableUnsequencedChannelArrayType == [1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT ->
 UnreliableSequencedChannelArrayType == [1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT -> ChannelType]
 UnreliableUnsequencedChannelArrayType == [1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT -> ChannelType]
 
+(* Basic debug helpers that don't depend on other functions *)
+EntityCount == cell_data.numEntities
+QueueLength == Len(cell_data.requestQueue)
+CurrentQueueContent == cell_data.requestQueue
+
 (* WebRTC Delivery Mode Enumeration *)
 DeliveryMode == "ReliableSequenced" \cup "ReliableUnsequenced" \cup "UnreliableSequenced" \cup "UnreliableUnsequenced"
 
@@ -155,6 +160,27 @@ IsOverloaded(cell) ==
 
 IsMergeEligible(cell) ==
     cell.numEntities < MIN_ENTITIES_FOR_MERGE /\ Len(cell.requestQueue) < MIN_QUEUE_LENGTH_FOR_MERGE
+
+(* Advanced debug helpers that depend on helper functions *)
+IsCurrentlyOverloaded == IsOverloaded(cell_data)
+CurrentOverloadReason == IF cell_data.numEntities > MAX_ENTITIES_PER_CELL 
+                        THEN "TOO_MANY_ENTITIES" 
+                        ELSE IF Len(cell_data.requestQueue) > MAX_QUEUE_LENGTH_PER_CELL 
+                        THEN "QUEUE_TOO_LONG" 
+                        ELSE "NOT_OVERLOADED"
+EntityGrowthStatus == IF cell_data.numEntities >= MIN_ENTITIES_FOR_GROWTH 
+                     THEN "CAN_GROW" 
+                     ELSE "BELOW_GROWTH_THRESHOLD"
+AllChannelQueues == <<
+    [type |-> "ReliableSeq", queues |-> [i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT |-> Len(channels_reliable_sequenced[i].queue)]],
+    [type |-> "ReliableUnseq", queues |-> [i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT |-> Len(channels_reliable_unsequenced[i].queue)]],
+    [type |-> "UnreliableSeq", queues |-> [i \in 1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT |-> Len(channels_unreliable_sequenced[i].queue)]],
+    [type |-> "UnreliableUnseq", queues |-> [i \in 1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT |-> Len(channels_unreliable_unsequenced[i].queue)]]
+>>
+TotalChannelLoad == Len(channels_reliable_sequenced[1].queue) + 
+                   Len(channels_reliable_unsequenced[1].queue) + 
+                   Len(channels_unreliable_sequenced[1].queue) + 
+                   Len(channels_unreliable_unsequenced[1].queue)
 
 (* WebRTC Channel Helpers for multiple channels per mode *)
 (* Find least loaded channel for load balancing *)
@@ -206,17 +232,9 @@ GetChannelForTaskType(task_type) ==
       [] task_type = "common" -> "UnreliableUnsequenced"       (* Background tasks *)
       [] OTHER -> "UnreliableUnsequenced"
 
-(* Invariant to test queue capacity limits - model checking will fail when queue gets too long *)
+(* Invariant to test queue capacity limits *)
 QueueCapacityInvariant ==
     Len(cell_data.requestQueue) <= MAX_QUEUE_LENGTH_PER_CELL
-
-(* WebRTC Channel Saturation Invariant - Tests head-of-line blocking mitigation *)
-WebRTCChannelSaturationInvariant ==
-    \* Reliable channels should not all be simultaneously saturated
-    \/ \E i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT : 
-        Len(channels_reliable_sequenced[i].queue) < MAX_RELIABLE_SEQUENCED_CHANNEL_QUEUE
-    \/ \E i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT : 
-        Len(channels_reliable_unsequenced[i].queue) < MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE
 
 (* Invariant to test entity growth limits *)
 EntityCapacityInvariant ==
@@ -225,6 +243,14 @@ EntityCapacityInvariant ==
 (* Overload management invariant - ensures system doesn't exceed capacity limits *)
 OverloadManagementInvariant ==
     ~IsOverloaded(cell_data)
+
+(* WebRTC Channel Saturation Invariant - Tests head-of-line blocking mitigation *)
+WebRTCChannelSaturationInvariant ==
+    \* Reliable channels should not all be simultaneously saturated
+    \/ \E i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT : 
+        Len(channels_reliable_sequenced[i].queue) < MAX_RELIABLE_SEQUENCED_CHANNEL_QUEUE
+    \/ \E i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT : 
+        Len(channels_reliable_unsequenced[i].queue) < MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE
 
 (* Merge eligibility invariant - tracks when cell could be merged (in multi-cell context) *)
 MergeEligibilityInvariant ==
