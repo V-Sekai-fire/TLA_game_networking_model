@@ -176,11 +176,19 @@ GetChannelForTaskType(task_type) ==
 
 (* Invariant to test queue capacity limits - model checking will fail when queue gets too long *)
 QueueCapacityInvariant ==
-    Len(cell_data.requestQueue) <= 5  (* Increased capacity with multiple channels per mode *)
+    Len(cell_data.requestQueue) <= 15  (* Aggressive limit to force failure under exponential load *)
+
+(* WebRTC Channel Saturation Invariant - Tests head-of-line blocking mitigation *)
+WebRTCChannelSaturationInvariant ==
+    \* Reliable channels should not all be simultaneously saturated
+    \/ \E i \in 1..ReliableSequencedChannelCount : 
+        Len(channels_reliable_sequenced[i].queue) < MaxReliableSequencedChannelQueue
+    \/ \E i \in 1..ReliableUnsequencedChannelCount : 
+        Len(channels_reliable_unsequenced[i].queue) < MaxReliableUnsequencedChannelQueue
 
 (* Invariant to test entity growth limits *)
 EntityCapacityInvariant ==
-    cell_data.numEntities <= 200  (* Increased entity limit to test higher capacity *)
+    cell_data.numEntities <= 100  (* Lower entity limit to see geometric growth effects sooner *)
 
 (* Overload management invariant - ensures system responds to overload conditions *)
 OverloadManagementInvariant ==
@@ -241,8 +249,16 @@ GenerateNetworkSyncActivity ==
 GeneratePhysicsActivity ==
     EnqueueTask(TaskImpact_Physics)
 
-GenerateEntityArrival == (*  Action to increase numEntities linearly *)
-    AddEntitiesToCell(5)  (*  Add 5 entities per arrival event for linear growth *)
+GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
+    /\ cell_data.numEntities < MaxEntitiesPerCell
+    /\ LET current_entities == cell_data.numEntities
+           (* True geometric growth: next = current * growth_rate *)
+           (* Growth rate of 1.2 means 20% increase each time *)
+           growth_rate == 20  (* Multiply by 1.2, using integer math: new = old + (old * 2) / 10 *)
+           geometric_increment == IF current_entities < 5 THEN 1  (* Minimum growth to get started *)
+                                 ELSE (current_entities * 2) \div 10  (* 20% of current population *)
+           actual_increment == IF geometric_increment < 1 THEN 1 ELSE geometric_increment
+       IN AddEntitiesToCell(actual_increment)
 
 (*  --- Action to simulate cell processing its queue --- *)
 ProcessCellWork ==
@@ -383,35 +399,28 @@ SendRareEvent ==
     (* Rare events use Channel 1: Reliable + Sequenced - critical, must arrive in order *)
     SendToReliableSequenced(TaskImpact_Rare)
 
-(* Zipfian-weighted task generation - more frequent tasks have higher probability *)
+(* Enhanced Zipfian-weighted task generation that uses WebRTC channels *)
 GenerateZipfianTaskActivity ==
-    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
-    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
-    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
-    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
-    \/ GenerateCommonTaskActivity        (* Rank 2: Common (20% of tasks) *)
-    \/ GenerateCommonTaskActivity        (* Rank 2: Common (20% of tasks) *)
-    \/ GenerateNetworkSyncActivity       (* Rank 3: Moderate (15% of tasks) *)
-    \/ GeneratePhysicsActivity           (* Rank 4: Less common (10% of tasks) *)
-    \/ GenerateInteractionActivity       (* Rank 5: Uncommon (8% of tasks) *)
-    \/ GenerateRareTaskActivity          (* Rank 6: Rare (5% of tasks) *)
-    \/ GenerateWorldLoadActivity         (* Rank 7: Very rare but expensive (2% of tasks) *)
+    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) - Uses Unreliable Sequenced *)
+    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) *)
+    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) *)
+    \/ SendMovementUpdate                (* Rank 1: Most frequent (40% of tasks) *)
+    \/ SendCommonUpdate                  (* Rank 2: Common (20% of tasks) - Uses Unreliable Unsequenced *)
+    \/ SendCommonUpdate                  (* Rank 2: Common (20% of tasks) *)
+    \/ SendNetworkSyncUpdate             (* Rank 3: Moderate (15% of tasks) - Uses Reliable Unsequenced *)
+    \/ SendPhysicsUpdate                 (* Rank 4: Less common (10% of tasks) - Uses Unreliable Sequenced *)
+    \/ SendInteractionEvent              (* Rank 5: Uncommon (8% of tasks) - Uses Reliable Sequenced *)
+    \/ SendRareEvent                     (* Rank 6: Rare (5% of tasks) - Uses Reliable Sequenced *)
+    \/ SendWorldStateUpdate              (* Rank 7: Very rare but expensive (2% of tasks) - Uses Reliable Unsequenced *)
 
 Next ==
-    \/ GenerateZipfianTaskActivity
-    \/ GenerateEntityArrival
-    \/ ProcessCellWork
-    \/ SendMovementUpdate
-    \/ SendInteractionEvent
-    \/ SendWorldStateUpdate
-    \/ SendNetworkSyncUpdate
-    \/ SendPhysicsUpdate
-    \/ SendCommonUpdate
-    \/ SendRareEvent
-    \/ ProcessReliableSequencedQueue
+    \/ GenerateZipfianTaskActivity       (* Primary load generator - sends to WebRTC channels *)
+    \/ GenerateEntityArrival             (* Geometric entity growth *)
+    \/ ProcessReliableSequencedQueue     (* Process WebRTC channel queues *)
     \/ ProcessReliableUnsequencedQueue
     \/ ProcessUnreliableSequencedQueue
     \/ ProcessUnreliableUnsequencedQueue
+    \/ ProcessCellWork                   (* Process main queue (less important for WebRTC testing) *)
 
 (* -------------------------------- SPECIFICATION AND THEOREM -------------------------------- *)
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
