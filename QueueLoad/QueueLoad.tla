@@ -20,7 +20,7 @@ DB_OPS_COMMON == 1
 MIN_ENTITIES_FOR_GROWTH == 3
 GEOMETRIC_GROWTH_RATE_PERCENT == 2
 GEOMETRIC_GROWTH_DIVISOR == 100
-BASELINE_ENTITIES == 5
+BASELINE_ENTITIES == 1
 
 VARIABLES 
     cell_data,
@@ -43,7 +43,8 @@ QueueCapacityInvariant ==
     Len(cell_data.requestQueue) <= MAX_QUEUE_LENGTH_PER_CELL
 
 OverloadManagementInvariant ==
-    Len(cell_data.requestQueue) <= MAX_QUEUE_LENGTH_PER_CELL
+    /\ Len(cell_data.requestQueue) <= MAX_QUEUE_LENGTH_PER_CELL
+    /\ \A i \in 1..Len(cell_data.requestQueue) : cell_data.requestQueue[i] <= DATABASE_OPS_PER_STEP * 5  (* Tasks scale linearly with DB capacity *)
 
 Init ==
     /\ cell_data = [numEntities |-> BASELINE_ENTITIES, requestQueue |-> << >>]
@@ -67,11 +68,7 @@ AddEntitiesToCell(entity_increment) ==
 GenerateCommonTaskActivity ==
     /\ cell_data.numEntities > 0
     /\ Len(cell_data.requestQueue) < MAX_QUEUE_LENGTH_PER_CELL
-    /\ LET tasks_per_entity == CASE DATABASE_OPS_PER_STEP <= 1 -> 5    (* 5 tasks per entity - very aggressive *)
-                                [] DATABASE_OPS_PER_STEP <= 10 -> 3   (* 3 tasks per entity - aggressive *)
-                                [] DATABASE_OPS_PER_STEP <= 50 -> 2   (* 2 tasks per entity - moderate *)
-                                [] DATABASE_OPS_PER_STEP <= 200 -> 1  (* 1 task per entity - light *)
-                                [] OTHER -> 1                          (* 1 task per entity minimum *)
+    /\ LET tasks_per_entity == 5    (* 5 tasks per entity - aggressive load *)
            tasks_to_generate == cell_data.numEntities * tasks_per_entity
        IN EnqueueTask(tasks_to_generate)
 
@@ -86,10 +83,16 @@ GenerateEntityArrival ==
 ProcessCellWork ==
     /\ Len(cell_data.requestQueue) > 0
     /\ LET first_task == Head(cell_data.requestQueue)
-       IN /\ first_task <= DATABASE_OPS_PER_STEP
-          /\ cell_data' = [cell_data EXCEPT !.requestQueue = Tail(cell_data.requestQueue)]
-          /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
-                         channels_unreliable_sequenced, channels_unreliable_unsequenced>>
+           remaining_work == first_task - DATABASE_OPS_PER_STEP
+       IN IF first_task <= DATABASE_OPS_PER_STEP
+          THEN \* Complete the task in this step
+               /\ cell_data' = [cell_data EXCEPT !.requestQueue = Tail(cell_data.requestQueue)]
+               /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
+                              channels_unreliable_sequenced, channels_unreliable_unsequenced>>
+          ELSE \* Partially process the task
+               /\ cell_data' = [cell_data EXCEPT !.requestQueue = <<remaining_work>> \o Tail(cell_data.requestQueue)]
+               /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
+                              channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 Next ==
     \/ ProcessCellWork
