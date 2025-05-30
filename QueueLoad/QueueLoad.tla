@@ -8,15 +8,26 @@ CONSTANTS
     MaxQueueLengthPerCell,    (*  Max request queue length before considering overload *)
     MinQueueLengthForMerge,   (*  Minimum queue length threshold for merge consideration *)
     
-    TaskImpact_Common,        (*  Load impact of a common task. *)
-    TaskImpact_Rare,          (*  Load impact of a rare, high-impact task. *)
-    TaskImpact_Movement,      (*  Player/avatar movement updates *)
-    TaskImpact_Interaction,   (*  Object interaction events *)
-    TaskImpact_WorldLoad,     (*  Loading world assets/geometry *)
-    TaskImpact_NetworkSync,   (*  Network state synchronization *)
-    TaskImpact_Physics,       (*  Physics simulation updates *)
-    CellProcessingCapacity,   (*  Max total task impact processed by a cell in one ProcessCellWork step. *)
-    BaselineEntities,         (*  Initial entity count for the root cell. *)
+    (* Database Operation Impacts - measured in database ops consumed per action *)
+    DBOps_Common,             (*  Database operations for a common task *)
+    DBOps_Rare,               (*  Database operations for a rare, high-impact task *)
+    DBOps_Movement,           (*  Player/avatar movement database updates *)
+    DBOps_Interaction,        (*  Object interaction database events *)
+    DBOps_WorldLoad,          (*  Loading world assets/geometry from database *)
+    DBOps_NetworkSync,        (*  Network state synchronization database writes *)
+    DBOps_Physics,            (*  Physics simulation database updates *)
+    DatabaseOpsPerStep,       (*  Database throughput limit (ops per model step) *)
+    
+    (* Network Bandwidth Impacts - measured in bytes consumed per packet *)
+    NetworkBytes_Common,      (*  Network bytes for common messages *)
+    NetworkBytes_Rare,        (*  Network bytes for rare events *)
+    NetworkBytes_Movement,    (*  Network bytes for movement updates *)
+    NetworkBytes_Interaction, (*  Network bytes for interaction events *)
+    NetworkBytes_WorldLoad,   (*  Network bytes for world loading *)
+    NetworkBytes_NetworkSync, (*  Network bytes for network sync *)
+    NetworkBytes_Physics,     (*  Network bytes for physics updates *)
+    
+    BaselineEntities,         (*  Initial entity count for the root cell *)
     
     (* WebRTC Channel Configuration - Individual channel counts per delivery mode *)
     ReliableSequencedChannelCount,       (*  Number of reliable sequenced channels *)
@@ -29,14 +40,14 @@ CONSTANTS
     MaxUnreliableUnsequencedChannelQueue (*  Max queue length for unreliable unsequenced channels *)
 
 ASSUME A_QueueConstantsPositive ==
-    /\ TaskImpact_Common \in Nat \ {0}
-    /\ TaskImpact_Rare \in Nat \ {0}
-    /\ TaskImpact_Movement \in Nat \ {0}
-    /\ TaskImpact_Interaction \in Nat \ {0}
-    /\ TaskImpact_WorldLoad \in Nat \ {0}
-    /\ TaskImpact_NetworkSync \in Nat \ {0}
-    /\ TaskImpact_Physics \in Nat \ {0}
-    /\ CellProcessingCapacity \in Nat \ {0}
+    /\ DBOps_Common \in Nat \ {0}
+    /\ DBOps_Rare \in Nat \ {0}
+    /\ DBOps_Movement \in Nat \ {0}
+    /\ DBOps_Interaction \in Nat \ {0}
+    /\ DBOps_WorldLoad \in Nat \ {0}
+    /\ DBOps_NetworkSync \in Nat \ {0}
+    /\ DBOps_Physics \in Nat \ {0}
+    /\ DatabaseOpsPerStep \in Nat \ {0}
 ASSUME A_EntityConstantsPositive ==
     /\ MaxEntitiesPerCell \in Nat \ {0}
     /\ MinEntitiesForMerge \in Nat
@@ -53,8 +64,25 @@ ASSUME A_WebRTCChannelConstraints ==
     /\ MaxReliableUnsequencedChannelQueue \in Nat \ {0}
     /\ MaxUnreliableSequencedChannelQueue \in Nat \ {0}
     /\ MaxUnreliableUnsequencedChannelQueue \in Nat \ {0}
+ASSUME A_DatabaseConstantsPositive ==
+    /\ DBOps_Common \in Nat \ {0}
+    /\ DBOps_Rare \in Nat \ {0}
+    /\ DBOps_Movement \in Nat \ {0}
+    /\ DBOps_Interaction \in Nat \ {0}
+    /\ DBOps_WorldLoad \in Nat \ {0}
+    /\ DBOps_NetworkSync \in Nat \ {0}
+    /\ DBOps_Physics \in Nat \ {0}
+    /\ DatabaseOpsPerStep \in Nat \ {0}
+ASSUME A_NetworkConstantsPositive ==
+    /\ NetworkBytes_Common \in Nat \ {0}
+    /\ NetworkBytes_Rare \in Nat \ {0}
+    /\ NetworkBytes_Movement \in Nat \ {0}
+    /\ NetworkBytes_Interaction \in Nat \ {0}
+    /\ NetworkBytes_WorldLoad \in Nat \ {0}
+    /\ NetworkBytes_NetworkSync \in Nat \ {0}
+    /\ NetworkBytes_Physics \in Nat \ {0}
 ASSUME A_ImpactHierarchy ==
-    TaskImpact_Rare >= TaskImpact_Common
+    DBOps_Rare >= DBOps_Common
 ASSUME A_MaxEntitiesSensible ==
     MaxEntitiesPerCell >= BaselineEntities
 ASSUME A_MaxQueueSensible ==
@@ -229,25 +257,25 @@ AddEntitiesToCell(entity_increment) ==
                    channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 GenerateCommonTaskActivity ==
-    EnqueueTask(TaskImpact_Common)
+    EnqueueTask(DBOps_Common)
 
 GenerateRareTaskActivity ==
-    EnqueueTask(TaskImpact_Rare)
+    EnqueueTask(DBOps_Rare)
 
 GenerateMovementActivity ==
-    EnqueueTask(TaskImpact_Movement)
+    EnqueueTask(DBOps_Movement)
 
 GenerateInteractionActivity ==
-    EnqueueTask(TaskImpact_Interaction)
+    EnqueueTask(DBOps_Interaction)
 
 GenerateWorldLoadActivity ==
-    EnqueueTask(TaskImpact_WorldLoad)
+    EnqueueTask(DBOps_WorldLoad)
 
 GenerateNetworkSyncActivity ==
-    EnqueueTask(TaskImpact_NetworkSync)
+    EnqueueTask(DBOps_NetworkSync)
 
 GeneratePhysicsActivity ==
-    EnqueueTask(TaskImpact_Physics)
+    EnqueueTask(DBOps_Physics)
 
 GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
     /\ cell_data.numEntities < MaxEntitiesPerCell
@@ -286,7 +314,7 @@ ProcessQueueWithCapacity(queue, capacity) ==
 (*  --- Action to simulate cell processing its queue with HOL blocking mitigation --- *)
 ProcessCellWork ==
     /\ Len(cell_data.requestQueue) > 0
-    /\ LET remaining_capacity == CellProcessingCapacity
+    /\ LET remaining_capacity == DatabaseOpsPerStep
            (* Process as many tasks as possible within capacity, skipping blocked ones *)
            processed_queue == ProcessQueueWithCapacity(cell_data.requestQueue, remaining_capacity)
        IN /\ cell_data' = [cell_data EXCEPT !.requestQueue = processed_queue]
@@ -397,31 +425,31 @@ ProcessUnreliableUnsequencedQueue ==
 (* VR-specific message generation with appropriate channel assignment *)
 SendMovementUpdate ==
     (* Movement uses Channel 3: Unreliable + Sequenced - latest position matters, drops OK *)
-    SendToUnreliableSequenced(TaskImpact_Movement)
+    SendToUnreliableSequenced(NetworkBytes_Movement)
 
 SendInteractionEvent ==
     (* Interactions use Channel 1: Reliable + Sequenced - must arrive in order *)
-    SendToReliableSequenced(TaskImpact_Interaction)
+    SendToReliableSequenced(NetworkBytes_Interaction)
 
 SendWorldStateUpdate ==
     (* World state uses Channel 2: Reliable + Unsequenced - must arrive, order less critical *)
-    SendToReliableUnsequenced(TaskImpact_WorldLoad)
+    SendToReliableUnsequenced(NetworkBytes_WorldLoad)
 
 SendNetworkSyncUpdate ==
     (* Network sync uses Channel 2: Reliable + Unsequenced - must arrive, order flexible *)
-    SendToReliableUnsequenced(TaskImpact_NetworkSync)
+    SendToReliableUnsequenced(NetworkBytes_NetworkSync)
 
 SendPhysicsUpdate ==
     (* Physics uses Channel 3: Unreliable + Sequenced - latest state matters *)
-    SendToUnreliableSequenced(TaskImpact_Physics)
+    SendToUnreliableSequenced(NetworkBytes_Physics)
 
 SendCommonUpdate ==
     (* Common tasks use Channel 4: Unreliable + Unsequenced - fire-and-forget *)
-    SendToUnreliableUnsequenced(TaskImpact_Common)
+    SendToUnreliableUnsequenced(NetworkBytes_Common)
 
 SendRareEvent ==
     (* Rare events use Channel 1: Reliable + Sequenced - critical, must arrive in order *)
-    SendToReliableSequenced(TaskImpact_Rare)
+    SendToReliableSequenced(NetworkBytes_Rare)
 
 (* Enhanced Zipfian-weighted task generation that uses WebRTC channels *)
 GenerateZipfianTaskActivity ==
