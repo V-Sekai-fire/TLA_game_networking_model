@@ -3,101 +3,83 @@
 EXTENDS Integers, Sequences, FiniteSets, TLC
 
 CONSTANTS
-    MaxEntitiesPerCell,       (*  Max entities a cell can hold before considering overload *)
-    MinEntitiesForMerge,      (*  Minimum entities threshold for merge consideration *)
-    MaxQueueLengthPerCell,    (*  Max request queue length before considering overload *)
-    MinQueueLengthForMerge,   (*  Minimum queue length threshold for merge consideration *)
+    MAX_ENTITIES_PER_CELL,       (*  Max entities a cell can hold before considering overload *)
+    MIN_ENTITIES_FOR_MERGE,      (*  Minimum entities threshold for merge consideration *)
+    MAX_QUEUE_LENGTH_PER_CELL,    (*  Max request queue length before considering overload *)
+    MIN_QUEUE_LENGTH_FOR_MERGE,   (*  Minimum queue length threshold for merge consideration *)
     
     (* Database Operation Impacts - measured in database ops consumed per action *)
-    DBOps_Common,             (*  Database operations for a common task *)
-    DBOps_Rare,               (*  Database operations for a rare, high-impact task *)
-    DBOps_Movement,           (*  Player/avatar movement database updates *)
-    DBOps_Interaction,        (*  Object interaction database events *)
-    DBOps_WorldLoad,          (*  Loading world assets/geometry from database *)
-    DBOps_NetworkSync,        (*  Network state synchronization database writes *)
-    DBOps_Physics,            (*  Physics simulation database updates *)
-    DatabaseOpsPerStep,       (*  Database throughput limit (ops per model step) *)
+    DB_OPS_COMMON,             (*  Database operations for a common task *)
+    DB_OPS_RARE,               (*  Database operations for a rare, high-impact task *)
+    DB_OPS_MOVEMENT,           (*  Player/avatar movement database updates *)
+    DB_OPS_INTERACTION,        (*  Object interaction database events *)
+    DB_OPS_WORLD_LOAD,          (*  Loading world assets/geometry from database *)
+    DB_OPS_NETWORK_SYNC,        (*  Network state synchronization database writes *)
+    DB_OPS_PHYSICS,            (*  Physics simulation database updates *)
+    DATABASE_OPS_PER_STEP,       (*  Database throughput limit (ops per model step) *)
     
     (* Network Bandwidth Impacts - measured in bytes consumed per packet *)
-    NetworkBytes_Common,      (*  Network bytes for common messages *)
-    NetworkBytes_Rare,        (*  Network bytes for rare events *)
-    NetworkBytes_Movement,    (*  Network bytes for movement updates *)
-    NetworkBytes_Interaction, (*  Network bytes for interaction events *)
-    NetworkBytes_WorldLoad,   (*  Network bytes for world loading *)
-    NetworkBytes_NetworkSync, (*  Network bytes for network sync *)
-    NetworkBytes_Physics,     (*  Network bytes for physics updates *)
+    NETWORK_BYTES_COMMON,      (*  Network bytes for common messages *)
+    NETWORK_BYTES_RARE,        (*  Network bytes for rare events *)
+    NETWORK_BYTES_MOVEMENT,    (*  Network bytes for movement updates *)
+    NETWORK_BYTES_INTERACTION, (*  Network bytes for interaction events *)
+    NETWORK_BYTES_WORLD_LOAD,   (*  Network bytes for world loading *)
+    NETWORK_BYTES_NETWORK_SYNC, (*  Network bytes for network sync *)
+    NETWORK_BYTES_PHYSICS,     (*  Network bytes for physics updates *)
     
-    BaselineEntities,         (*  Initial entity count for the root cell *)
+    BASELINE_ENTITIES,         (*  Initial entity count for the root cell *)
     
     (* WebRTC Channel Configuration - Individual channel counts per delivery mode *)
-    ReliableSequencedChannelCount,       (*  Number of reliable sequenced channels *)
-    ReliableUnsequencedChannelCount,     (*  Number of reliable unsequenced channels *)
-    UnreliableSequencedChannelCount,     (*  Number of unreliable sequenced channels *)
-    UnreliableUnsequencedChannelCount,   (*  Number of unreliable unsequenced channels *)
-    MaxReliableSequencedChannelQueue,    (*  Max queue length for reliable sequenced channels *)
-    MaxReliableUnsequencedChannelQueue,  (*  Max queue length for reliable unsequenced channels *)
-    MaxUnreliableSequencedChannelQueue,  (*  Max queue length for unreliable sequenced channels *)
-    MaxUnreliableUnsequencedChannelQueue (*  Max queue length for unreliable unsequenced channels *)
+    RELIABLE_SEQUENCED_CHANNEL_COUNT,       (*  Number of reliable sequenced channels *)
+    RELIABLE_UNSEQUENCED_CHANNEL_COUNT,     (*  Number of reliable unsequenced channels *)
+    UNRELIABLE_SEQUENCED_CHANNEL_COUNT,     (*  Number of unreliable sequenced channels *)
+    UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT,   (*  Number of unreliable unsequenced channels *)
+    MAX_RELIABLE_SEQUENCED_CHANNEL_QUEUE,    (*  Max queue length for reliable sequenced channels *)
+    MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE,  (*  Max queue length for reliable unsequenced channels *)
+    MAX_UNRELIABLE_SEQUENCED_CHANNEL_QUEUE,  (*  Max queue length for unreliable sequenced channels *)
+    MAX_UNRELIABLE_UNSEQUENCED_CHANNEL_QUEUE (*  Max queue length for unreliable unsequenced channels *)
 
-ASSUME A_QueueConstantsPositive ==
-    /\ DBOps_Common \in Nat \ {0}
-    /\ DBOps_Rare \in Nat \ {0}
-    /\ DBOps_Movement \in Nat \ {0}
-    /\ DBOps_Interaction \in Nat \ {0}
-    /\ DBOps_WorldLoad \in Nat \ {0}
-    /\ DBOps_NetworkSync \in Nat \ {0}
-    /\ DBOps_Physics \in Nat \ {0}
-    /\ DatabaseOpsPerStep \in Nat \ {0}
-ASSUME A_EntityConstantsPositive ==
-    /\ MaxEntitiesPerCell \in Nat \ {0}
-    /\ MinEntitiesForMerge \in Nat
-    /\ BaselineEntities \in Nat
-ASSUME A_QueueLengthConstantsPositive ==
-    /\ MaxQueueLengthPerCell \in Nat \ {0}
-    /\ MinQueueLengthForMerge \in Nat
-ASSUME A_WebRTCChannelConstraints ==
-    /\ ReliableSequencedChannelCount \in Nat \ {0}
-    /\ ReliableUnsequencedChannelCount \in Nat \ {0}
-    /\ UnreliableSequencedChannelCount \in Nat \ {0}
-    /\ UnreliableUnsequencedChannelCount \in Nat \ {0}
-    /\ MaxReliableSequencedChannelQueue \in Nat \ {0}
-    /\ MaxReliableUnsequencedChannelQueue \in Nat \ {0}
-    /\ MaxUnreliableSequencedChannelQueue \in Nat \ {0}
-    /\ MaxUnreliableUnsequencedChannelQueue \in Nat \ {0}
-ASSUME A_DatabaseConstantsPositive ==
-    /\ DBOps_Common \in Nat \ {0}
-    /\ DBOps_Rare \in Nat \ {0}
-    /\ DBOps_Movement \in Nat \ {0}
-    /\ DBOps_Interaction \in Nat \ {0}
-    /\ DBOps_WorldLoad \in Nat \ {0}
-    /\ DBOps_NetworkSync \in Nat \ {0}
-    /\ DBOps_Physics \in Nat \ {0}
-    /\ DatabaseOpsPerStep \in Nat \ {0}
-ASSUME A_NetworkConstantsPositive ==
-    /\ NetworkBytes_Common \in Nat \ {0}
-    /\ NetworkBytes_Rare \in Nat \ {0}
-    /\ NetworkBytes_Movement \in Nat \ {0}
-    /\ NetworkBytes_Interaction \in Nat \ {0}
-    /\ NetworkBytes_WorldLoad \in Nat \ {0}
-    /\ NetworkBytes_NetworkSync \in Nat \ {0}
-    /\ NetworkBytes_Physics \in Nat \ {0}
-ASSUME A_ImpactHierarchy ==
-    DBOps_Rare >= DBOps_Common
-ASSUME A_MaxEntitiesSensible ==
-    MaxEntitiesPerCell >= BaselineEntities
-ASSUME A_MaxQueueSensible ==
-    MaxQueueLengthPerCell > 0
+ASSUME A_PositiveConstants ==
+    /\ DB_OPS_COMMON \in Nat \ {0}
+    /\ DB_OPS_RARE \in Nat \ {0}
+    /\ DB_OPS_MOVEMENT \in Nat \ {0}
+    /\ DB_OPS_INTERACTION \in Nat \ {0}
+    /\ DB_OPS_WORLD_LOAD \in Nat \ {0}
+    /\ DB_OPS_NETWORK_SYNC \in Nat \ {0}
+    /\ DB_OPS_PHYSICS \in Nat \ {0}
+    /\ DATABASE_OPS_PER_STEP \in Nat \ {0}
+    /\ MAX_ENTITIES_PER_CELL \in Nat \ {0}
+    /\ MAX_QUEUE_LENGTH_PER_CELL \in Nat \ {0}
+    /\ RELIABLE_SEQUENCED_CHANNEL_COUNT \in Nat \ {0}
+    /\ RELIABLE_UNSEQUENCED_CHANNEL_COUNT \in Nat \ {0}
+    /\ UNRELIABLE_SEQUENCED_CHANNEL_COUNT \in Nat \ {0}
+    /\ UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT \in Nat \ {0}
+    /\ MAX_RELIABLE_SEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
+    /\ MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
+    /\ MAX_UNRELIABLE_SEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
+    /\ MAX_UNRELIABLE_UNSEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
+    /\ NETWORK_BYTES_COMMON \in Nat \ {0}
+    /\ NETWORK_BYTES_RARE \in Nat \ {0}
+    /\ NETWORK_BYTES_MOVEMENT \in Nat \ {0}
+    /\ NETWORK_BYTES_INTERACTION \in Nat \ {0}
+    /\ NETWORK_BYTES_WORLD_LOAD \in Nat \ {0}
+    /\ NETWORK_BYTES_NETWORK_SYNC \in Nat \ {0}
+    /\ NETWORK_BYTES_PHYSICS \in Nat \ {0}
+
+ASSUME A_LogicalConstraints ==
+    /\ DB_OPS_RARE >= DB_OPS_COMMON
+    /\ MAX_ENTITIES_PER_CELL >= BASELINE_ENTITIES
+    /\ MIN_ENTITIES_FOR_MERGE \in Nat
+    /\ MIN_QUEUE_LENGTH_FOR_MERGE \in Nat
 
 VARIABLES 
     cell_data,                          (*  Record for the single cell: [numEntities: Nat, requestQueue: Seq(Nat)] *)
-    overload_state,                     (*  Track if cell is overloaded: BOOLEAN *)
-    merge_eligible,                     (*  Track if cell is eligible for merge: BOOLEAN *)
     channels_reliable_sequenced,        (*  Multiple Reliable + Sequenced channels - Critical interactions *)
     channels_reliable_unsequenced,      (*  Multiple Reliable + Unsequenced channels - Important data *)
     channels_unreliable_sequenced,      (*  Multiple Unreliable + Sequenced channels - Real-time updates *)
     channels_unreliable_unsequenced     (*  Multiple Unreliable + Unsequenced channels - Fire-and-forget *)
 
-vars == <<cell_data, overload_state, merge_eligible, 
+vars == <<cell_data, 
           channels_reliable_sequenced, channels_reliable_unsequenced,
           channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
@@ -110,10 +92,10 @@ ChannelType == [queue : Seq(Nat),
                 dropped : Nat]
 
 (* Multiple channels per delivery mode to reduce head-of-line blocking *)
-ReliableSequencedChannelArrayType == [1..ReliableSequencedChannelCount -> ChannelType]
-ReliableUnsequencedChannelArrayType == [1..ReliableUnsequencedChannelCount -> ChannelType]
-UnreliableSequencedChannelArrayType == [1..UnreliableSequencedChannelCount -> ChannelType]
-UnreliableUnsequencedChannelArrayType == [1..UnreliableUnsequencedChannelCount -> ChannelType]
+ReliableSequencedChannelArrayType == [1..RELIABLE_SEQUENCED_CHANNEL_COUNT -> ChannelType]
+ReliableUnsequencedChannelArrayType == [1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT -> ChannelType]
+UnreliableSequencedChannelArrayType == [1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT -> ChannelType]
+UnreliableUnsequencedChannelArrayType == [1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT -> ChannelType]
 
 (* WebRTC Delivery Mode Enumeration *)
 DeliveryMode == "ReliableSequenced" \cup "ReliableUnsequenced" \cup "UnreliableSequenced" \cup "UnreliableUnsequenced"
@@ -138,8 +120,6 @@ TypeOK ==
     /\ cell_data \in CellType
     /\ cell_data.numEntities >= 0
     /\ \A i \in 1..Len(cell_data.requestQueue) : cell_data.requestQueue[i] \in Nat \ {0}
-    /\ overload_state \in BOOLEAN
-    /\ merge_eligible \in BOOLEAN
     /\ channels_reliable_sequenced \in ReliableSequencedChannelArrayType
     /\ channels_reliable_unsequenced \in ReliableUnsequencedChannelArrayType
     /\ channels_unreliable_sequenced \in UnreliableSequencedChannelArrayType
@@ -147,49 +127,49 @@ TypeOK ==
 
 (* Helper functions for load management *)
 IsOverloaded(cell) ==
-    cell.numEntities > MaxEntitiesPerCell \/ Len(cell.requestQueue) > MaxQueueLengthPerCell
+    cell.numEntities > MAX_ENTITIES_PER_CELL \/ Len(cell.requestQueue) > MAX_QUEUE_LENGTH_PER_CELL
 
 IsMergeEligible(cell) ==
-    cell.numEntities < MinEntitiesForMerge /\ Len(cell.requestQueue) < MinQueueLengthForMerge
+    cell.numEntities < MIN_ENTITIES_FOR_MERGE /\ Len(cell.requestQueue) < MIN_QUEUE_LENGTH_FOR_MERGE
 
 (* WebRTC Channel Helpers for multiple channels per mode *)
 (* Find least loaded channel for load balancing *)
 FindLeastLoadedChannelRS(channel_array) ==
-    LET channel_loads == [i \in 1..ReliableSequencedChannelCount |-> Len(channel_array[i].queue)]
+    LET channel_loads == [i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT |-> Len(channel_array[i].queue)]
         min_load == CHOOSE load \in DOMAIN channel_loads : 
                        \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
     IN min_load
 
 FindLeastLoadedChannelRU(channel_array) ==
-    LET channel_loads == [i \in 1..ReliableUnsequencedChannelCount |-> Len(channel_array[i].queue)]
+    LET channel_loads == [i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT |-> Len(channel_array[i].queue)]
         min_load == CHOOSE load \in DOMAIN channel_loads : 
                        \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
     IN min_load
 
 FindLeastLoadedChannelUS(channel_array) ==
-    LET channel_loads == [i \in 1..UnreliableSequencedChannelCount |-> Len(channel_array[i].queue)]
+    LET channel_loads == [i \in 1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT |-> Len(channel_array[i].queue)]
         min_load == CHOOSE load \in DOMAIN channel_loads : 
                        \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
     IN min_load
 
 FindLeastLoadedChannelUU(channel_array) ==
-    LET channel_loads == [i \in 1..UnreliableUnsequencedChannelCount |-> Len(channel_array[i].queue)]
+    LET channel_loads == [i \in 1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT |-> Len(channel_array[i].queue)]
         min_load == CHOOSE load \in DOMAIN channel_loads : 
                        \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
     IN min_load
 
 (* Check if any channel in the array can accept packets *)
 CanEnqueueToReliableSequenced == 
-    \E i \in 1..ReliableSequencedChannelCount : Len(channels_reliable_sequenced[i].queue) < MaxReliableSequencedChannelQueue
+    \E i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT : Len(channels_reliable_sequenced[i].queue) < MAX_RELIABLE_SEQUENCED_CHANNEL_QUEUE
 
 CanEnqueueToReliableUnsequenced == 
-    \E i \in 1..ReliableUnsequencedChannelCount : Len(channels_reliable_unsequenced[i].queue) < MaxReliableUnsequencedChannelQueue
+    \E i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT : Len(channels_reliable_unsequenced[i].queue) < MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE
 
 CanEnqueueToUnreliableSequenced == 
-    \E i \in 1..UnreliableSequencedChannelCount : Len(channels_unreliable_sequenced[i].queue) < MaxUnreliableSequencedChannelQueue
+    \E i \in 1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT : Len(channels_unreliable_sequenced[i].queue) < MAX_UNRELIABLE_SEQUENCED_CHANNEL_QUEUE
 
 CanEnqueueToUnreliableUnsequenced == 
-    \E i \in 1..UnreliableUnsequencedChannelCount : Len(channels_unreliable_unsequenced[i].queue) < MaxUnreliableUnsequencedChannelQueue
+    \E i \in 1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT : Len(channels_unreliable_unsequenced[i].queue) < MAX_UNRELIABLE_UNSEQUENCED_CHANNEL_QUEUE
 
 (* Task Type to Channel Mapping - each task type assigned to appropriate delivery mode *)
 GetChannelForTaskType(task_type) ==
@@ -209,10 +189,10 @@ QueueCapacityInvariant ==
 (* WebRTC Channel Saturation Invariant - Tests head-of-line blocking mitigation *)
 WebRTCChannelSaturationInvariant ==
     \* Reliable channels should not all be simultaneously saturated
-    \/ \E i \in 1..ReliableSequencedChannelCount : 
-        Len(channels_reliable_sequenced[i].queue) < MaxReliableSequencedChannelQueue
-    \/ \E i \in 1..ReliableUnsequencedChannelCount : 
-        Len(channels_reliable_unsequenced[i].queue) < MaxReliableUnsequencedChannelQueue
+    \/ \E i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT : 
+        Len(channels_reliable_sequenced[i].queue) < MAX_RELIABLE_SEQUENCED_CHANNEL_QUEUE
+    \/ \E i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT : 
+        Len(channels_reliable_unsequenced[i].queue) < MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE
 
 (* Invariant to test entity growth limits *)
 EntityCapacityInvariant ==
@@ -220,22 +200,20 @@ EntityCapacityInvariant ==
 
 (* Overload management invariant - ensures system responds to overload conditions *)
 OverloadManagementInvariant ==
-    overload_state = IsOverloaded(cell_data)
+    IsOverloaded(cell_data)
 
 (* Merge eligibility invariant - tracks when cell could be merged (in multi-cell context) *)
 MergeEligibilityInvariant ==
-    merge_eligible = IsMergeEligible(cell_data)
+    IsMergeEligible(cell_data)
 
 (*  ------------------------------------ INITIALIZATION ------------------------------------ *)
 Init ==
-    /\ cell_data = [ numEntities  |-> BaselineEntities,
+    /\ cell_data = [ numEntities  |-> BASELINE_ENTITIES,
                     requestQueue |-> << >> ]
-    /\ overload_state = IsOverloaded(cell_data)
-    /\ merge_eligible = IsMergeEligible(cell_data)
-    /\ channels_reliable_sequenced = [i \in 1..ReliableSequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
-    /\ channels_reliable_unsequenced = [i \in 1..ReliableUnsequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
-    /\ channels_unreliable_sequenced = [i \in 1..UnreliableSequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
-    /\ channels_unreliable_unsequenced = [i \in 1..UnreliableUnsequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_reliable_sequenced = [i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_reliable_unsequenced = [i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_unreliable_sequenced = [i \in 1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_unreliable_unsequenced = [i \in 1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT |-> [queue |-> << >>, dropped |-> 0]]
 
 (*  --------------------------------------- ACTIONS ---------------------------------------- *)
 
@@ -243,42 +221,38 @@ Init ==
 EnqueueTask(task_impact) ==
     /\ task_impact \in Nat \ {0}
     /\ cell_data' = [cell_data EXCEPT !.requestQueue = Append(cell_data.requestQueue, task_impact)]
-    /\ overload_state' = IsOverloaded(cell_data')
-    /\ merge_eligible' = IsMergeEligible(cell_data')
     /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
                    channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 AddEntitiesToCell(entity_increment) ==
     /\ entity_increment \in Nat \ {0}
     /\ cell_data' = [cell_data EXCEPT !.numEntities = cell_data.numEntities + entity_increment]
-    /\ overload_state' = IsOverloaded(cell_data')
-    /\ merge_eligible' = IsMergeEligible(cell_data')
     /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
                    channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 GenerateCommonTaskActivity ==
-    EnqueueTask(DBOps_Common)
+    EnqueueTask(DB_OPS_COMMON)
 
 GenerateRareTaskActivity ==
-    EnqueueTask(DBOps_Rare)
+    EnqueueTask(DB_OPS_RARE)
 
 GenerateMovementActivity ==
-    EnqueueTask(DBOps_Movement)
+    EnqueueTask(DB_OPS_MOVEMENT)
 
 GenerateInteractionActivity ==
-    EnqueueTask(DBOps_Interaction)
+    EnqueueTask(DB_OPS_INTERACTION)
 
 GenerateWorldLoadActivity ==
-    EnqueueTask(DBOps_WorldLoad)
+    EnqueueTask(DB_OPS_WORLD_LOAD)
 
 GenerateNetworkSyncActivity ==
-    EnqueueTask(DBOps_NetworkSync)
+    EnqueueTask(DB_OPS_NETWORK_SYNC)
 
 GeneratePhysicsActivity ==
-    EnqueueTask(DBOps_Physics)
+    EnqueueTask(DB_OPS_PHYSICS)
 
 GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
-    /\ cell_data.numEntities < MaxEntitiesPerCell
+    /\ cell_data.numEntities < MAX_ENTITIES_PER_CELL
     /\ LET current_entities == cell_data.numEntities
            (* True geometric growth: next = current * growth_rate *)
            (* Growth rate of 1.2 means 20% increase each time *)
@@ -314,12 +288,10 @@ ProcessQueueWithCapacity(queue, capacity) ==
 (*  --- Action to simulate cell processing its queue with HOL blocking mitigation --- *)
 ProcessCellWork ==
     /\ Len(cell_data.requestQueue) > 0
-    /\ LET remaining_capacity == DatabaseOpsPerStep
+    /\ LET remaining_capacity == DATABASE_OPS_PER_STEP
            (* Process as many tasks as possible within capacity, skipping blocked ones *)
            processed_queue == ProcessQueueWithCapacity(cell_data.requestQueue, remaining_capacity)
        IN /\ cell_data' = [cell_data EXCEPT !.requestQueue = processed_queue]
-          /\ overload_state' = IsOverloaded(cell_data')
-          /\ merge_eligible' = IsMergeEligible(cell_data')
           /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
                          channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
@@ -333,7 +305,7 @@ SendToReliableSequenced(packet_size) ==
         LET least_loaded_channel == FindLeastLoadedChannelRS(channels_reliable_sequenced)
         IN /\ channels_reliable_sequenced' = [channels_reliable_sequenced EXCEPT 
                                              ![least_loaded_channel].queue = Append(channels_reliable_sequenced[least_loaded_channel].queue, packet_size)]
-           /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+           /\ UNCHANGED <<cell_data, 
                           channels_reliable_unsequenced, channels_unreliable_sequenced, channels_unreliable_unsequenced>>
        ELSE
         \* Reliable channel blocks when full - action disabled
@@ -347,7 +319,7 @@ SendToReliableUnsequenced(packet_size) ==
         LET least_loaded_channel == FindLeastLoadedChannelRU(channels_reliable_unsequenced)
         IN /\ channels_reliable_unsequenced' = [channels_reliable_unsequenced EXCEPT 
                                                ![least_loaded_channel].queue = Append(channels_reliable_unsequenced[least_loaded_channel].queue, packet_size)]
-           /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+           /\ UNCHANGED <<cell_data, 
                           channels_reliable_sequenced, channels_unreliable_sequenced, channels_unreliable_unsequenced>>
        ELSE
         \* Reliable channel blocks when full - action disabled
@@ -361,14 +333,14 @@ SendToUnreliableSequenced(packet_size) ==
         LET least_loaded_channel == FindLeastLoadedChannelUS(channels_unreliable_sequenced)
         IN /\ channels_unreliable_sequenced' = [channels_unreliable_sequenced EXCEPT 
                                                ![least_loaded_channel].queue = Append(channels_unreliable_sequenced[least_loaded_channel].queue, packet_size)]
-           /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+           /\ UNCHANGED <<cell_data, 
                           channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_unsequenced>>
        ELSE
         \* Unreliable channel drops when full - non-blocking, increment dropped counter for least loaded channel
         LET least_loaded_channel == FindLeastLoadedChannelUS(channels_unreliable_sequenced)
         IN /\ channels_unreliable_sequenced' = [channels_unreliable_sequenced EXCEPT 
                                                ![least_loaded_channel].dropped = channels_unreliable_sequenced[least_loaded_channel].dropped + 1]
-           /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+           /\ UNCHANGED <<cell_data, 
                           channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_unsequenced>>
 
 (* Channel 4: Unreliable + Unsequenced - Common tasks, heartbeats *)
@@ -379,77 +351,77 @@ SendToUnreliableUnsequenced(packet_size) ==
         LET least_loaded_channel == FindLeastLoadedChannelUU(channels_unreliable_unsequenced)
         IN /\ channels_unreliable_unsequenced' = [channels_unreliable_unsequenced EXCEPT 
                                                  ![least_loaded_channel].queue = Append(channels_unreliable_unsequenced[least_loaded_channel].queue, packet_size)]
-           /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+           /\ UNCHANGED <<cell_data, 
                           channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_sequenced>>
        ELSE
         \* Unreliable channel drops when full - non-blocking, increment dropped counter for least loaded channel
         LET least_loaded_channel == FindLeastLoadedChannelUU(channels_unreliable_unsequenced)
         IN /\ channels_unreliable_unsequenced' = [channels_unreliable_unsequenced EXCEPT 
                                                  ![least_loaded_channel].dropped = channels_unreliable_unsequenced[least_loaded_channel].dropped + 1]
-           /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+           /\ UNCHANGED <<cell_data, 
                           channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_sequenced>>
 
 (* Process each channel's queue - transmit buffered packets *)
 ProcessReliableSequencedQueue ==
-    \E i \in 1..ReliableSequencedChannelCount :
+    \E i \in 1..RELIABLE_SEQUENCED_CHANNEL_COUNT :
         /\ Len(channels_reliable_sequenced[i].queue) > 0
         /\ channels_reliable_sequenced' = [channels_reliable_sequenced EXCEPT 
                                          ![i].queue = Tail(channels_reliable_sequenced[i].queue)]
-        /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+        /\ UNCHANGED <<cell_data, 
                       channels_reliable_unsequenced, channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 ProcessReliableUnsequencedQueue ==
-    \E i \in 1..ReliableUnsequencedChannelCount :
+    \E i \in 1..RELIABLE_UNSEQUENCED_CHANNEL_COUNT :
         /\ Len(channels_reliable_unsequenced[i].queue) > 0
         /\ channels_reliable_unsequenced' = [channels_reliable_unsequenced EXCEPT 
                                            ![i].queue = Tail(channels_reliable_unsequenced[i].queue)]
-        /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+        /\ UNCHANGED <<cell_data, 
                       channels_reliable_sequenced, channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 ProcessUnreliableSequencedQueue ==
-    \E i \in 1..UnreliableSequencedChannelCount :
+    \E i \in 1..UNRELIABLE_SEQUENCED_CHANNEL_COUNT :
         /\ Len(channels_unreliable_sequenced[i].queue) > 0
         /\ channels_unreliable_sequenced' = [channels_unreliable_sequenced EXCEPT 
                                            ![i].queue = Tail(channels_unreliable_sequenced[i].queue)]
-        /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+        /\ UNCHANGED <<cell_data, 
                       channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_unsequenced>>
 
 ProcessUnreliableUnsequencedQueue ==
-    \E i \in 1..UnreliableUnsequencedChannelCount :
+    \E i \in 1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUNT :
         /\ Len(channels_unreliable_unsequenced[i].queue) > 0
         /\ channels_unreliable_unsequenced' = [channels_unreliable_unsequenced EXCEPT 
                                              ![i].queue = Tail(channels_unreliable_unsequenced[i].queue)]
-        /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
+        /\ UNCHANGED <<cell_data, 
                       channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_sequenced>>
 
 (* VR-specific message generation with appropriate channel assignment *)
 SendMovementUpdate ==
     (* Movement uses Channel 3: Unreliable + Sequenced - latest position matters, drops OK *)
-    SendToUnreliableSequenced(NetworkBytes_Movement)
+    SendToUnreliableSequenced(NETWORK_BYTES_MOVEMENT)
 
 SendInteractionEvent ==
     (* Interactions use Channel 1: Reliable + Sequenced - must arrive in order *)
-    SendToReliableSequenced(NetworkBytes_Interaction)
+    SendToReliableSequenced(NETWORK_BYTES_INTERACTION)
 
 SendWorldStateUpdate ==
     (* World state uses Channel 2: Reliable + Unsequenced - must arrive, order less critical *)
-    SendToReliableUnsequenced(NetworkBytes_WorldLoad)
+    SendToReliableUnsequenced(NETWORK_BYTES_WORLD_LOAD)
 
 SendNetworkSyncUpdate ==
     (* Network sync uses Channel 2: Reliable + Unsequenced - must arrive, order flexible *)
-    SendToReliableUnsequenced(NetworkBytes_NetworkSync)
+    SendToReliableUnsequenced(NETWORK_BYTES_NETWORK_SYNC)
 
 SendPhysicsUpdate ==
     (* Physics uses Channel 3: Unreliable + Sequenced - latest state matters *)
-    SendToUnreliableSequenced(NetworkBytes_Physics)
+    SendToUnreliableSequenced(NETWORK_BYTES_PHYSICS)
 
 SendCommonUpdate ==
     (* Common tasks use Channel 4: Unreliable + Unsequenced - fire-and-forget *)
-    SendToUnreliableUnsequenced(NetworkBytes_Common)
+    SendToUnreliableUnsequenced(NETWORK_BYTES_COMMON)
 
 SendRareEvent ==
     (* Rare events use Channel 1: Reliable + Sequenced - critical, must arrive in order *)
-    SendToReliableSequenced(NetworkBytes_Rare)
+    SendToReliableSequenced(NETWORK_BYTES_RARE)
 
 (* Enhanced Zipfian-weighted task generation that uses WebRTC channels *)
 GenerateZipfianTaskActivity ==
