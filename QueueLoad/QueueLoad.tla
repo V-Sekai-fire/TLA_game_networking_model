@@ -260,12 +260,36 @@ GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
            actual_increment == IF geometric_increment < 1 THEN 1 ELSE geometric_increment
        IN AddEntitiesToCell(actual_increment)
 
-(*  --- Action to simulate cell processing its queue --- *)
+(* Check if any task in the queue can be processed with remaining capacity *)
+CanProcessAnyInQueue(queue, capacity) ==
+    IF Len(queue) = 0 THEN FALSE
+    ELSE \E i \in 1..Len(queue) : queue[i] <= capacity
+
+(* Helper function to process queue with capacity limits and HOL mitigation *)
+RECURSIVE ProcessQueueWithCapacity(_, _)
+ProcessQueueWithCapacity(queue, capacity) ==
+    IF Len(queue) = 0 \/ capacity <= 0 THEN queue
+    ELSE LET first_task == Head(queue)
+             rest_queue == Tail(queue)
+         IN IF first_task <= capacity THEN
+                (* Process this task and continue with remaining capacity *)
+                ProcessQueueWithCapacity(rest_queue, capacity - first_task)
+            ELSE
+                (* Task too big - check if we can process anything else in the queue *)
+                IF CanProcessAnyInQueue(rest_queue, capacity) THEN
+                    (* Move blocked task to end and try processing rest *)
+                    ProcessQueueWithCapacity(Append(rest_queue, first_task), capacity)
+                ELSE
+                    (* Nothing can be processed - return original queue *)
+                    queue
+
+(*  --- Action to simulate cell processing its queue with HOL blocking mitigation --- *)
 ProcessCellWork ==
     /\ Len(cell_data.requestQueue) > 0
-    /\ LET first_task == Head(cell_data.requestQueue)
-       IN /\ first_task <= CellProcessingCapacity
-          /\ cell_data' = [cell_data EXCEPT !.requestQueue = Tail(cell_data.requestQueue)]
+    /\ LET remaining_capacity == CellProcessingCapacity
+           (* Process as many tasks as possible within capacity, skipping blocked ones *)
+           processed_queue == ProcessQueueWithCapacity(cell_data.requestQueue, remaining_capacity)
+       IN /\ cell_data' = [cell_data EXCEPT !.requestQueue = processed_queue]
           /\ overload_state' = IsOverloaded(cell_data')
           /\ merge_eligible' = IsMergeEligible(cell_data')
           /\ UNCHANGED <<channels_reliable_sequenced, channels_reliable_unsequenced, 
