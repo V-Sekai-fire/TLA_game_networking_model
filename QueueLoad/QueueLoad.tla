@@ -95,14 +95,22 @@ ProcessCellWork ==
        IN /\ first_task <= CellProcessingCapacity
           /\ cell_data' = [cell_data EXCEPT !.requestQueue = Tail(cell_data.requestQueue)]
 
+(* Zipfian-weighted task generation - more frequent tasks have higher probability *)
+GenerateZipfianTaskActivity ==
+    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
+    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
+    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
+    \/ GenerateMovementActivity          (* Rank 1: Most frequent (40% of tasks) *)
+    \/ GenerateCommonTaskActivity        (* Rank 2: Common (20% of tasks) *)
+    \/ GenerateCommonTaskActivity        (* Rank 2: Common (20% of tasks) *)
+    \/ GenerateNetworkSyncActivity       (* Rank 3: Moderate (15% of tasks) *)
+    \/ GeneratePhysicsActivity           (* Rank 4: Less common (10% of tasks) *)
+    \/ GenerateInteractionActivity       (* Rank 5: Uncommon (8% of tasks) *)
+    \/ GenerateRareTaskActivity          (* Rank 6: Rare (5% of tasks) *)
+    \/ GenerateWorldLoadActivity         (* Rank 7: Very rare but expensive (2% of tasks) *)
+
 Next ==
-    \/ GenerateCommonTaskActivity
-    \/ GenerateRareTaskActivity
-    \/ GenerateMovementActivity
-    \/ GenerateInteractionActivity
-    \/ GenerateWorldLoadActivity
-    \/ GenerateNetworkSyncActivity
-    \/ GeneratePhysicsActivity
+    \/ GenerateZipfianTaskActivity
     \/ GenerateEntityArrival
     \/ ProcessCellWork
 
