@@ -297,25 +297,41 @@ AddEntitiesToCell(entity_increment) ==
                    channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 GenerateCommonTaskActivity ==
-    EnqueueTask(DB_OPS_COMMON)
+    /\ cell_data.numEntities > 0
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_COMMON) \div 10  (* Scale by entity count *)
+           actual_tasks == IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate
+       IN EnqueueTask(actual_tasks)
 
 GenerateRareTaskActivity ==
-    EnqueueTask(DB_OPS_RARE)
+    /\ cell_data.numEntities > 0
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_RARE) \div 100  (* Rare events scale slower *)
+           actual_tasks == IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate
+       IN EnqueueTask(actual_tasks)
 
 GenerateMovementActivity ==
-    EnqueueTask(DB_OPS_MOVEMENT)
+    /\ cell_data.numEntities > 0
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_MOVEMENT) \div 5  (* Movement scales with entities *)
+       IN EnqueueTask(tasks_to_generate)
 
 GenerateInteractionActivity ==
-    EnqueueTask(DB_OPS_INTERACTION)
+    /\ cell_data.numEntities > 0  
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_INTERACTION) \div 20  (* Interactions less frequent *)
+       IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateWorldLoadActivity ==
-    EnqueueTask(DB_OPS_WORLD_LOAD)
+    /\ cell_data.numEntities > 0
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_WORLD_LOAD) \div 50  (* World loading very infrequent *)
+       IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateNetworkSyncActivity ==
-    EnqueueTask(DB_OPS_NETWORK_SYNC)
+    /\ cell_data.numEntities > 0
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_NETWORK_SYNC) \div 15  (* Network sync moderate *)
+       IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GeneratePhysicsActivity ==
-    EnqueueTask(DB_OPS_PHYSICS)
+    /\ cell_data.numEntities > 0
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_PHYSICS) \div 8  (* Physics fairly frequent *)
+       IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
     /\ LET current_entities == cell_data.numEntities
