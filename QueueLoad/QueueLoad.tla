@@ -7,42 +7,10 @@ CONSTANTS
     MAX_QUEUE_LENGTH_PER_CELL,    (*  Max request queue length before considering overload *)
     MIN_QUEUE_LENGTH_FOR_MERGE,   (*  Minimum queue length threshold for merge consideration *)
     
-    (* Database Operation Impacts - measured in database ops consumed per action *)
-    DB_OPS_COMMON,             (*  Database operations for a common task *)
-    DB_OPS_RARE,               (*  Database operations for a rare, high-impact task *)
-    DB_OPS_MOVEMENT,           (*  Player/avatar movement database updates *)
-    DB_OPS_INTERACTION,        (*  Object interaction database events *)
-    DB_OPS_WORLD_LOAD,          (*  Loading world assets/geometry from database *)
-    DB_OPS_NETWORK_SYNC,        (*  Network state synchronization database writes *)
-    DB_OPS_PHYSICS,            (*  Physics simulation database updates *)
+    (* Database Operation Impacts - infrastructure decisions *)
     DATABASE_OPS_PER_STEP,       (*  Database throughput limit (ops per model step) *)
     
-    (* Network Bandwidth Impacts - measured in bytes consumed per packet *)
-    NETWORK_BYTES_COMMON,      (*  Network bytes for common messages *)
-    NETWORK_BYTES_RARE,        (*  Network bytes for rare events *)
-    NETWORK_BYTES_MOVEMENT,    (*  Network bytes for movement updates *)
-    NETWORK_BYTES_INTERACTION, (*  Network bytes for interaction events *)
-    NETWORK_BYTES_WORLD_LOAD,   (*  Network bytes for world loading *)
-    NETWORK_BYTES_NETWORK_SYNC, (*  Network bytes for network sync *)
-    NETWORK_BYTES_PHYSICS,     (*  Network bytes for physics updates *)
-    
-    BASELINE_ENTITIES,         (*  Initial entity count for the root cell *)
-    
-    (* Model Testing Constants - Growth and distribution parameters *)
-    MIN_ENTITIES_FOR_GROWTH,            (*  Minimum entities threshold to start geometric growth *)
-    GEOMETRIC_GROWTH_RATE_PERCENT,      (*  Percentage growth rate for geometric entity increase *)
-    GEOMETRIC_GROWTH_DIVISOR,           (*  Divisor for integer arithmetic in growth calculation *)
-    
-    (* Zipfian Distribution Constants for task generation weights *)
-    ZIPF_MOVEMENT_WEIGHT,               (*  Weight for movement updates (most frequent) *)
-    ZIPF_COMMON_WEIGHT,                 (*  Weight for common tasks *)
-    ZIPF_NETWORK_SYNC_WEIGHT,           (*  Weight for network sync updates *)
-    ZIPF_PHYSICS_WEIGHT,                (*  Weight for physics updates *)
-    ZIPF_INTERACTION_WEIGHT,            (*  Weight for interaction events *)
-    ZIPF_RARE_WEIGHT,                   (*  Weight for rare events *)
-    ZIPF_WORLD_LOAD_WEIGHT,             (*  Weight for world loading (least frequent but expensive) *)
-    
-    (* WebRTC Channel Configuration - Individual channel counts per delivery mode *)
+    (* WebRTC Channel Configuration - infrastructure decisions *)
     RELIABLE_SEQUENCED_CHANNEL_COUNT,       (*  Number of reliable sequenced channels *)
     RELIABLE_UNSEQUENCED_CHANNEL_COUNT,     (*  Number of reliable unsequenced channels *)
     UNRELIABLE_SEQUENCED_CHANNEL_COUNT,     (*  Number of unreliable sequenced channels *)
@@ -52,14 +20,57 @@ CONSTANTS
     MAX_UNRELIABLE_SEQUENCED_CHANNEL_QUEUE,  (*  Max queue length for unreliable sequenced channels *)
     MAX_UNRELIABLE_UNSEQUENCED_CHANNEL_QUEUE (*  Max queue length for unreliable unsequenced channels *)
 
+(* Time abstraction: Each model step = 100ms (0.1 seconds) *)
+(* This allows plotting against ops/second: DATABASE_OPS_PER_STEP * 10 = ops/sec *)
+MODEL_STEP_DURATION_MS == 100
+STEPS_PER_SECOND == 1000 \div MODEL_STEP_DURATION_MS
+
+(* Network Event CPU Time on Elixir Green Threads (microseconds) *)
+(* These represent actual CPU processing time per network event *)
+NETWORK_EVENT_CPU_TIME_COMMON == 50      (* 50μs - simple message *)
+NETWORK_EVENT_CPU_TIME_MOVEMENT == 75    (* 75μs - position updates *)
+NETWORK_EVENT_CPU_TIME_PHYSICS == 100    (* 100μs - physics calculations *)
+NETWORK_EVENT_CPU_TIME_INTERACTION == 150 (* 150μs - interaction validation *)
+NETWORK_EVENT_CPU_TIME_NETWORK_SYNC == 200 (* 200μs - state synchronization *)
+NETWORK_EVENT_CPU_TIME_RARE == 500       (* 500μs - complex rare events *)
+NETWORK_EVENT_CPU_TIME_WORLD_LOAD == 800 (* 800μs - world asset processing *)
+
+(* Database Operation Impacts - hardcoded based on typical VR workloads *)
+DB_OPS_COMMON == 1             (* Simple state updates *)
+DB_OPS_MOVEMENT == 1           (* Position logging *)
+DB_OPS_PHYSICS == 3            (* Physics state persistence *)
+DB_OPS_INTERACTION == 4        (* Interaction event logging *)
+DB_OPS_NETWORK_SYNC == 6       (* Network state synchronization *)
+DB_OPS_RARE == 8               (* Complex rare events *)
+DB_OPS_WORLD_LOAD == 12        (* Loading world geometry/assets *)
+
+(* Network Packet Sizes - hardcoded based on WebRTC message types *)
+NETWORK_BYTES_COMMON == 50      (* Small status messages *)
+NETWORK_BYTES_MOVEMENT == 100   (* Position + rotation data *)
+NETWORK_BYTES_PHYSICS == 150    (* Physics state vectors *)
+NETWORK_BYTES_INTERACTION == 200 (* Interaction event data *)
+NETWORK_BYTES_NETWORK_SYNC == 300 (* State synchronization *)
+NETWORK_BYTES_RARE == 500       (* Complex event payloads *)
+NETWORK_BYTES_WORLD_LOAD == 2000 (* Asset metadata packets *)
+
+(* Zipfian Distribution - hardcoded VR usage patterns *)
+ZIPF_MOVEMENT_WEIGHT == 8       (* Most frequent: movement updates *)
+ZIPF_COMMON_WEIGHT == 4         (* Common: status/heartbeat *)
+ZIPF_NETWORK_SYNC_WEIGHT == 3   (* Regular: state sync *)
+ZIPF_PHYSICS_WEIGHT == 3        (* Regular: physics updates *)
+ZIPF_INTERACTION_WEIGHT == 2    (* Less frequent: interactions *)
+ZIPF_RARE_WEIGHT == 2           (* Less frequent: special events *)
+ZIPF_WORLD_LOAD_WEIGHT == 2     (* Least frequent: asset loading *)
+
+(* Entity Growth Parameters - hardcoded for stress testing *)
+MIN_ENTITIES_FOR_GROWTH == 3            (* Start growth after 3 entities *)
+GEOMETRIC_GROWTH_RATE_PERCENT == 50     (* 50% growth rate *)
+GEOMETRIC_GROWTH_DIVISOR == 100         (* For percentage calculation *)
+
+(* Initial entity count - hardcoded baseline *)
+BASELINE_ENTITIES == 10
+
 ASSUME A_PositiveConstants ==
-    /\ DB_OPS_COMMON \in Nat \ {0}
-    /\ DB_OPS_RARE \in Nat \ {0}
-    /\ DB_OPS_MOVEMENT \in Nat \ {0}
-    /\ DB_OPS_INTERACTION \in Nat \ {0}
-    /\ DB_OPS_WORLD_LOAD \in Nat \ {0}
-    /\ DB_OPS_NETWORK_SYNC \in Nat \ {0}
-    /\ DB_OPS_PHYSICS \in Nat \ {0}
     /\ DATABASE_OPS_PER_STEP \in Nat \ {0}
     /\ MAX_QUEUE_LENGTH_PER_CELL \in Nat \ {0}
     /\ RELIABLE_SEQUENCED_CHANNEL_COUNT \in Nat \ {0}
@@ -70,23 +81,6 @@ ASSUME A_PositiveConstants ==
     /\ MAX_RELIABLE_UNSEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
     /\ MAX_UNRELIABLE_SEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
     /\ MAX_UNRELIABLE_UNSEQUENCED_CHANNEL_QUEUE \in Nat \ {0}
-    /\ NETWORK_BYTES_COMMON \in Nat \ {0}
-    /\ NETWORK_BYTES_RARE \in Nat \ {0}
-    /\ NETWORK_BYTES_MOVEMENT \in Nat \ {0}
-    /\ NETWORK_BYTES_INTERACTION \in Nat \ {0}
-    /\ NETWORK_BYTES_WORLD_LOAD \in Nat \ {0}
-    /\ NETWORK_BYTES_NETWORK_SYNC \in Nat \ {0}
-    /\ NETWORK_BYTES_PHYSICS \in Nat \ {0}
-    /\ MIN_ENTITIES_FOR_GROWTH \in Nat \ {0}
-    /\ GEOMETRIC_GROWTH_RATE_PERCENT \in Nat \ {0}
-    /\ GEOMETRIC_GROWTH_DIVISOR \in Nat \ {0}
-    /\ ZIPF_MOVEMENT_WEIGHT \in Nat \ {0}
-    /\ ZIPF_COMMON_WEIGHT \in Nat \ {0}
-    /\ ZIPF_NETWORK_SYNC_WEIGHT \in Nat \ {0}
-    /\ ZIPF_PHYSICS_WEIGHT \in Nat \ {0}
-    /\ ZIPF_INTERACTION_WEIGHT \in Nat \ {0}
-    /\ ZIPF_RARE_WEIGHT \in Nat \ {0}
-    /\ ZIPF_WORLD_LOAD_WEIGHT \in Nat \ {0}
 
 ASSUME A_LogicalConstraints ==
     /\ DB_OPS_RARE >= DB_OPS_COMMON
@@ -122,6 +116,37 @@ UnreliableUnsequencedChannelArrayType == [1..UNRELIABLE_UNSEQUENCED_CHANNEL_COUN
 EntityCount == cell_data.numEntities
 QueueLength == Len(cell_data.requestQueue)
 CurrentQueueContent == cell_data.requestQueue
+
+(* Network event timing helpers for performance analysis *)
+GetNetworkEventCpuTime(event_type) ==
+    CASE event_type = "common" -> NETWORK_EVENT_CPU_TIME_COMMON
+      [] event_type = "movement" -> NETWORK_EVENT_CPU_TIME_MOVEMENT
+      [] event_type = "physics" -> NETWORK_EVENT_CPU_TIME_PHYSICS
+      [] event_type = "interaction" -> NETWORK_EVENT_CPU_TIME_INTERACTION
+      [] event_type = "networksync" -> NETWORK_EVENT_CPU_TIME_NETWORK_SYNC
+      [] event_type = "rare" -> NETWORK_EVENT_CPU_TIME_RARE
+      [] event_type = "worldload" -> NETWORK_EVENT_CPU_TIME_WORLD_LOAD
+      [] OTHER -> NETWORK_EVENT_CPU_TIME_COMMON
+
+(* Convert microseconds per event to events per second capacity *)
+GetNetworkEventCapacityPerSecond(event_type) ==
+    1000000 \div GetNetworkEventCpuTime(event_type)  (* 1,000,000 μs = 1 second *)
+
+(* Get current network processing load in events per second *)
+CurrentNetworkLoadPerSecond ==
+    LET movement_events == ZIPF_MOVEMENT_WEIGHT * STEPS_PER_SECOND
+        common_events == ZIPF_COMMON_WEIGHT * STEPS_PER_SECOND
+        physics_events == ZIPF_PHYSICS_WEIGHT * STEPS_PER_SECOND
+        sync_events == ZIPF_NETWORK_SYNC_WEIGHT * STEPS_PER_SECOND
+        interaction_events == ZIPF_INTERACTION_WEIGHT * STEPS_PER_SECOND
+        rare_events == ZIPF_RARE_WEIGHT * STEPS_PER_SECOND
+        worldload_events == ZIPF_WORLD_LOAD_WEIGHT * STEPS_PER_SECOND
+    IN movement_events + common_events + physics_events + sync_events + 
+       interaction_events + rare_events + worldload_events
+
+(* Calculate if network processing is saturated *)
+IsNetworkSaturated ==
+    CurrentNetworkLoadPerSecond > GetNetworkEventCapacityPerSecond("common")
 
 (* WebRTC Delivery Mode Enumeration *)
 DeliveryMode == "ReliableSequenced" \cup "ReliableUnsequenced" \cup "UnreliableSequenced" \cup "UnreliableUnsequenced"
