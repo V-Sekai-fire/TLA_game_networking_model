@@ -37,7 +37,7 @@ TypeOK ==
 
 (* Invariant to test queue capacity limits - model checking will fail when queue gets too long *)
 QueueCapacityInvariant ==
-    Len(cell_data.requestQueue) <= 10  (* Adjust this limit to test different thresholds *)
+    Len(cell_data.requestQueue) <= 10
 
 (* Invariant to test entity growth limits *)
 EntityCapacityInvariant ==
