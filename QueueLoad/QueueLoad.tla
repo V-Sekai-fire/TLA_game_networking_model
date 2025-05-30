@@ -3,7 +3,6 @@
 EXTENDS Integers, Sequences, FiniteSets, TLC
 
 CONSTANTS
-    MAX_ENTITIES_PER_CELL,       (*  Max entities a cell can hold before considering overload *)
     MIN_ENTITIES_FOR_MERGE,      (*  Minimum entities threshold for merge consideration *)
     MAX_QUEUE_LENGTH_PER_CELL,    (*  Max request queue length before considering overload *)
     MIN_QUEUE_LENGTH_FOR_MERGE,   (*  Minimum queue length threshold for merge consideration *)
@@ -62,7 +61,6 @@ ASSUME A_PositiveConstants ==
     /\ DB_OPS_NETWORK_SYNC \in Nat \ {0}
     /\ DB_OPS_PHYSICS \in Nat \ {0}
     /\ DATABASE_OPS_PER_STEP \in Nat \ {0}
-    /\ MAX_ENTITIES_PER_CELL \in Nat \ {0}
     /\ MAX_QUEUE_LENGTH_PER_CELL \in Nat \ {0}
     /\ RELIABLE_SEQUENCED_CHANNEL_COUNT \in Nat \ {0}
     /\ RELIABLE_UNSEQUENCED_CHANNEL_COUNT \in Nat \ {0}
@@ -92,7 +90,6 @@ ASSUME A_PositiveConstants ==
 
 ASSUME A_LogicalConstraints ==
     /\ DB_OPS_RARE >= DB_OPS_COMMON
-    /\ MAX_ENTITIES_PER_CELL >= BASELINE_ENTITIES
     /\ MIN_ENTITIES_FOR_MERGE \in Nat
     /\ MIN_QUEUE_LENGTH_FOR_MERGE \in Nat
 
@@ -156,16 +153,14 @@ TypeOK ==
 
 (* Helper functions for load management *)
 IsOverloaded(cell) ==
-    cell.numEntities > MAX_ENTITIES_PER_CELL \/ Len(cell.requestQueue) > MAX_QUEUE_LENGTH_PER_CELL
+    Len(cell.requestQueue) > MAX_QUEUE_LENGTH_PER_CELL
 
 IsMergeEligible(cell) ==
     cell.numEntities < MIN_ENTITIES_FOR_MERGE /\ Len(cell.requestQueue) < MIN_QUEUE_LENGTH_FOR_MERGE
 
 (* Advanced debug helpers that depend on helper functions *)
 IsCurrentlyOverloaded == IsOverloaded(cell_data)
-CurrentOverloadReason == IF cell_data.numEntities > MAX_ENTITIES_PER_CELL 
-                        THEN "TOO_MANY_ENTITIES" 
-                        ELSE IF Len(cell_data.requestQueue) > MAX_QUEUE_LENGTH_PER_CELL 
+CurrentOverloadReason == IF Len(cell_data.requestQueue) > MAX_QUEUE_LENGTH_PER_CELL 
                         THEN "QUEUE_TOO_LONG" 
                         ELSE "NOT_OVERLOADED"
 EntityGrowthStatus == IF cell_data.numEntities >= MIN_ENTITIES_FOR_GROWTH 
@@ -236,10 +231,6 @@ GetChannelForTaskType(task_type) ==
 QueueCapacityInvariant ==
     Len(cell_data.requestQueue) <= MAX_QUEUE_LENGTH_PER_CELL
 
-(* Invariant to test entity growth limits *)
-EntityCapacityInvariant ==
-    cell_data.numEntities <= MAX_ENTITIES_PER_CELL
-
 (* Overload management invariant - ensures system doesn't exceed capacity limits *)
 OverloadManagementInvariant ==
     ~IsOverloaded(cell_data)
@@ -302,7 +293,6 @@ GeneratePhysicsActivity ==
     EnqueueTask(DB_OPS_PHYSICS)
 
 GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
-    /\ cell_data.numEntities < MAX_ENTITIES_PER_CELL
     /\ LET current_entities == cell_data.numEntities
            (* True geometric growth: next = current * growth_rate *)
            (* Growth rate configured via GEOMETRIC_GROWTH_RATE_PERCENT *)
@@ -496,12 +486,19 @@ GenerateZipfianTaskActivity ==
 
 Next ==
     \/ GenerateZipfianTaskActivity       (* Primary load generator - sends to WebRTC channels *)
+    \/ GenerateCommonTaskActivity        (* Generate database tasks *)
+    \/ GenerateRareTaskActivity
+    \/ GenerateMovementActivity  
+    \/ GenerateInteractionActivity
+    \/ GenerateWorldLoadActivity
+    \/ GenerateNetworkSyncActivity
+    \/ GeneratePhysicsActivity
     \/ GenerateEntityArrival             (* Geometric entity growth *)
     \/ ProcessReliableSequencedQueue     (* Process WebRTC channel queues *)
     \/ ProcessReliableUnsequencedQueue
     \/ ProcessUnreliableSequencedQueue
     \/ ProcessUnreliableUnsequencedQueue
-    \/ ProcessCellWork                   (* Process main queue (less important for WebRTC testing) *)
+    \/ ProcessCellWork                   (* Process main queue - this should be the bottleneck *)
 
 (* -------------------------------- SPECIFICATION AND THEOREM -------------------------------- *)
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
