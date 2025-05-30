@@ -18,9 +18,15 @@ CONSTANTS
     CellProcessingCapacity,   (*  Max total task impact processed by a cell in one ProcessCellWork step. *)
     BaselineEntities,         (*  Initial entity count for the root cell. *)
     
-    (* WebRTC Channel Configuration - Multiple channels per delivery mode to reduce HOL blocking *)
-    MaxChannelQueueLength,    (*  Max queue length per channel before dropping packets *)
-    ChannelsPerMode           (*  Number of channels per delivery mode (e.g., 4 means 16 total channels) *)
+    (* WebRTC Channel Configuration - Individual channel counts per delivery mode *)
+    ReliableSequencedChannelCount,       (*  Number of reliable sequenced channels *)
+    ReliableUnsequencedChannelCount,     (*  Number of reliable unsequenced channels *)
+    UnreliableSequencedChannelCount,     (*  Number of unreliable sequenced channels *)
+    UnreliableUnsequencedChannelCount,   (*  Number of unreliable unsequenced channels *)
+    MaxReliableSequencedChannelQueue,    (*  Max queue length for reliable sequenced channels *)
+    MaxReliableUnsequencedChannelQueue,  (*  Max queue length for reliable unsequenced channels *)
+    MaxUnreliableSequencedChannelQueue,  (*  Max queue length for unreliable sequenced channels *)
+    MaxUnreliableUnsequencedChannelQueue (*  Max queue length for unreliable unsequenced channels *)
 
 ASSUME A_QueueConstantsPositive ==
     /\ TaskImpact_Common \in Nat \ {0}
@@ -39,9 +45,14 @@ ASSUME A_QueueLengthConstantsPositive ==
     /\ MaxQueueLengthPerCell \in Nat \ {0}
     /\ MinQueueLengthForMerge \in Nat
 ASSUME A_WebRTCChannelConstraints ==
-    /\ MaxChannelQueueLength \in Nat \ {0}
-    /\ ChannelsPerMode \in Nat \ {0}
-    /\ ChannelsPerMode >= 1
+    /\ ReliableSequencedChannelCount \in Nat \ {0}
+    /\ ReliableUnsequencedChannelCount \in Nat \ {0}
+    /\ UnreliableSequencedChannelCount \in Nat \ {0}
+    /\ UnreliableUnsequencedChannelCount \in Nat \ {0}
+    /\ MaxReliableSequencedChannelQueue \in Nat \ {0}
+    /\ MaxReliableUnsequencedChannelQueue \in Nat \ {0}
+    /\ MaxUnreliableSequencedChannelQueue \in Nat \ {0}
+    /\ MaxUnreliableUnsequencedChannelQueue \in Nat \ {0}
 ASSUME A_ImpactHierarchy ==
     TaskImpact_Rare >= TaskImpact_Common
 ASSUME A_MaxEntitiesSensible ==
@@ -71,7 +82,10 @@ ChannelType == [queue : Seq(Nat),
                 dropped : Nat]
 
 (* Multiple channels per delivery mode to reduce head-of-line blocking *)
-ChannelArrayType == [1..ChannelsPerMode -> ChannelType]
+ReliableSequencedChannelArrayType == [1..ReliableSequencedChannelCount -> ChannelType]
+ReliableUnsequencedChannelArrayType == [1..ReliableUnsequencedChannelCount -> ChannelType]
+UnreliableSequencedChannelArrayType == [1..UnreliableSequencedChannelCount -> ChannelType]
+UnreliableUnsequencedChannelArrayType == [1..UnreliableUnsequencedChannelCount -> ChannelType]
 
 (* WebRTC Delivery Mode Enumeration *)
 DeliveryMode == "ReliableSequenced" \cup "ReliableUnsequenced" \cup "UnreliableSequenced" \cup "UnreliableUnsequenced"
@@ -98,10 +112,10 @@ TypeOK ==
     /\ \A i \in 1..Len(cell_data.requestQueue) : cell_data.requestQueue[i] \in Nat \ {0}
     /\ overload_state \in BOOLEAN
     /\ merge_eligible \in BOOLEAN
-    /\ channels_reliable_sequenced \in ChannelArrayType
-    /\ channels_reliable_unsequenced \in ChannelArrayType
-    /\ channels_unreliable_sequenced \in ChannelArrayType
-    /\ channels_unreliable_unsequenced \in ChannelArrayType
+    /\ channels_reliable_sequenced \in ReliableSequencedChannelArrayType
+    /\ channels_reliable_unsequenced \in ReliableUnsequencedChannelArrayType
+    /\ channels_unreliable_sequenced \in UnreliableSequencedChannelArrayType
+    /\ channels_unreliable_unsequenced \in UnreliableUnsequencedChannelArrayType
 
 (* Helper functions for load management *)
 IsOverloaded(cell) ==
@@ -112,24 +126,42 @@ IsMergeEligible(cell) ==
 
 (* WebRTC Channel Helpers for multiple channels per mode *)
 (* Find least loaded channel for load balancing *)
-FindLeastLoadedChannel(channel_array) ==
-    LET channel_loads == [i \in 1..ChannelsPerMode |-> Len(channel_array[i].queue)]
+FindLeastLoadedChannelRS(channel_array) ==
+    LET channel_loads == [i \in 1..ReliableSequencedChannelCount |-> Len(channel_array[i].queue)]
+        min_load == CHOOSE load \in DOMAIN channel_loads : 
+                       \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
+    IN min_load
+
+FindLeastLoadedChannelRU(channel_array) ==
+    LET channel_loads == [i \in 1..ReliableUnsequencedChannelCount |-> Len(channel_array[i].queue)]
+        min_load == CHOOSE load \in DOMAIN channel_loads : 
+                       \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
+    IN min_load
+
+FindLeastLoadedChannelUS(channel_array) ==
+    LET channel_loads == [i \in 1..UnreliableSequencedChannelCount |-> Len(channel_array[i].queue)]
+        min_load == CHOOSE load \in DOMAIN channel_loads : 
+                       \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
+    IN min_load
+
+FindLeastLoadedChannelUU(channel_array) ==
+    LET channel_loads == [i \in 1..UnreliableUnsequencedChannelCount |-> Len(channel_array[i].queue)]
         min_load == CHOOSE load \in DOMAIN channel_loads : 
                        \A other \in DOMAIN channel_loads : channel_loads[load] <= channel_loads[other]
     IN min_load
 
 (* Check if any channel in the array can accept packets *)
 CanEnqueueToReliableSequenced == 
-    \E i \in 1..ChannelsPerMode : Len(channels_reliable_sequenced[i].queue) < MaxChannelQueueLength
+    \E i \in 1..ReliableSequencedChannelCount : Len(channels_reliable_sequenced[i].queue) < MaxReliableSequencedChannelQueue
 
 CanEnqueueToReliableUnsequenced == 
-    \E i \in 1..ChannelsPerMode : Len(channels_reliable_unsequenced[i].queue) < MaxChannelQueueLength
+    \E i \in 1..ReliableUnsequencedChannelCount : Len(channels_reliable_unsequenced[i].queue) < MaxReliableUnsequencedChannelQueue
 
 CanEnqueueToUnreliableSequenced == 
-    \E i \in 1..ChannelsPerMode : Len(channels_unreliable_sequenced[i].queue) < MaxChannelQueueLength
+    \E i \in 1..UnreliableSequencedChannelCount : Len(channels_unreliable_sequenced[i].queue) < MaxUnreliableSequencedChannelQueue
 
 CanEnqueueToUnreliableUnsequenced == 
-    \E i \in 1..ChannelsPerMode : Len(channels_unreliable_unsequenced[i].queue) < MaxChannelQueueLength
+    \E i \in 1..UnreliableUnsequencedChannelCount : Len(channels_unreliable_unsequenced[i].queue) < MaxUnreliableUnsequencedChannelQueue
 
 (* Task Type to Channel Mapping - each task type assigned to appropriate delivery mode *)
 GetChannelForTaskType(task_type) ==
@@ -164,10 +196,10 @@ Init ==
                     requestQueue |-> << >> ]
     /\ overload_state = IsOverloaded(cell_data)
     /\ merge_eligible = IsMergeEligible(cell_data)
-    /\ channels_reliable_sequenced = [i \in 1..ChannelsPerMode |-> [queue |-> << >>, dropped |-> 0]]
-    /\ channels_reliable_unsequenced = [i \in 1..ChannelsPerMode |-> [queue |-> << >>, dropped |-> 0]]
-    /\ channels_unreliable_sequenced = [i \in 1..ChannelsPerMode |-> [queue |-> << >>, dropped |-> 0]]
-    /\ channels_unreliable_unsequenced = [i \in 1..ChannelsPerMode |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_reliable_sequenced = [i \in 1..ReliableSequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_reliable_unsequenced = [i \in 1..ReliableUnsequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_unreliable_sequenced = [i \in 1..UnreliableSequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
+    /\ channels_unreliable_unsequenced = [i \in 1..UnreliableUnsequencedChannelCount |-> [queue |-> << >>, dropped |-> 0]]
 
 (*  --------------------------------------- ACTIONS ---------------------------------------- *)
 
@@ -230,7 +262,7 @@ SendToReliableSequenced(packet_size) ==
     /\ packet_size \in Nat \ {0}
     /\ IF CanEnqueueToReliableSequenced THEN
         \* Queue has space - enqueue packet to least loaded channel
-        LET least_loaded_channel == FindLeastLoadedChannel(channels_reliable_sequenced)
+        LET least_loaded_channel == FindLeastLoadedChannelRS(channels_reliable_sequenced)
         IN /\ channels_reliable_sequenced' = [channels_reliable_sequenced EXCEPT 
                                              ![least_loaded_channel].queue = Append(channels_reliable_sequenced[least_loaded_channel].queue, packet_size)]
            /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
@@ -244,7 +276,7 @@ SendToReliableUnsequenced(packet_size) ==
     /\ packet_size \in Nat \ {0}
     /\ IF CanEnqueueToReliableUnsequenced THEN
         \* Queue has space - enqueue packet to least loaded channel
-        LET least_loaded_channel == FindLeastLoadedChannel(channels_reliable_unsequenced)
+        LET least_loaded_channel == FindLeastLoadedChannelRU(channels_reliable_unsequenced)
         IN /\ channels_reliable_unsequenced' = [channels_reliable_unsequenced EXCEPT 
                                                ![least_loaded_channel].queue = Append(channels_reliable_unsequenced[least_loaded_channel].queue, packet_size)]
            /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
@@ -258,14 +290,14 @@ SendToUnreliableSequenced(packet_size) ==
     /\ packet_size \in Nat \ {0}
     /\ IF CanEnqueueToUnreliableSequenced THEN
         \* Queue has space - enqueue packet to least loaded channel
-        LET least_loaded_channel == FindLeastLoadedChannel(channels_unreliable_sequenced)
+        LET least_loaded_channel == FindLeastLoadedChannelUS(channels_unreliable_sequenced)
         IN /\ channels_unreliable_sequenced' = [channels_unreliable_sequenced EXCEPT 
                                                ![least_loaded_channel].queue = Append(channels_unreliable_sequenced[least_loaded_channel].queue, packet_size)]
            /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
                           channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_unsequenced>>
        ELSE
         \* Unreliable channel drops when full - non-blocking, increment dropped counter for least loaded channel
-        LET least_loaded_channel == FindLeastLoadedChannel(channels_unreliable_sequenced)
+        LET least_loaded_channel == FindLeastLoadedChannelUS(channels_unreliable_sequenced)
         IN /\ channels_unreliable_sequenced' = [channels_unreliable_sequenced EXCEPT 
                                                ![least_loaded_channel].dropped = channels_unreliable_sequenced[least_loaded_channel].dropped + 1]
            /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
@@ -276,14 +308,14 @@ SendToUnreliableUnsequenced(packet_size) ==
     /\ packet_size \in Nat \ {0}
     /\ IF CanEnqueueToUnreliableUnsequenced THEN
         \* Queue has space - enqueue packet to least loaded channel
-        LET least_loaded_channel == FindLeastLoadedChannel(channels_unreliable_unsequenced)
+        LET least_loaded_channel == FindLeastLoadedChannelUU(channels_unreliable_unsequenced)
         IN /\ channels_unreliable_unsequenced' = [channels_unreliable_unsequenced EXCEPT 
                                                  ![least_loaded_channel].queue = Append(channels_unreliable_unsequenced[least_loaded_channel].queue, packet_size)]
            /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
                           channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_sequenced>>
        ELSE
         \* Unreliable channel drops when full - non-blocking, increment dropped counter for least loaded channel
-        LET least_loaded_channel == FindLeastLoadedChannel(channels_unreliable_unsequenced)
+        LET least_loaded_channel == FindLeastLoadedChannelUU(channels_unreliable_unsequenced)
         IN /\ channels_unreliable_unsequenced' = [channels_unreliable_unsequenced EXCEPT 
                                                  ![least_loaded_channel].dropped = channels_unreliable_unsequenced[least_loaded_channel].dropped + 1]
            /\ UNCHANGED <<cell_data, overload_state, merge_eligible, 
@@ -291,7 +323,7 @@ SendToUnreliableUnsequenced(packet_size) ==
 
 (* Process each channel's queue - transmit buffered packets *)
 ProcessReliableSequencedQueue ==
-    \E i \in 1..ChannelsPerMode :
+    \E i \in 1..ReliableSequencedChannelCount :
         /\ Len(channels_reliable_sequenced[i].queue) > 0
         /\ channels_reliable_sequenced' = [channels_reliable_sequenced EXCEPT 
                                          ![i].queue = Tail(channels_reliable_sequenced[i].queue)]
@@ -299,7 +331,7 @@ ProcessReliableSequencedQueue ==
                       channels_reliable_unsequenced, channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 ProcessReliableUnsequencedQueue ==
-    \E i \in 1..ChannelsPerMode :
+    \E i \in 1..ReliableUnsequencedChannelCount :
         /\ Len(channels_reliable_unsequenced[i].queue) > 0
         /\ channels_reliable_unsequenced' = [channels_reliable_unsequenced EXCEPT 
                                            ![i].queue = Tail(channels_reliable_unsequenced[i].queue)]
@@ -307,7 +339,7 @@ ProcessReliableUnsequencedQueue ==
                       channels_reliable_sequenced, channels_unreliable_sequenced, channels_unreliable_unsequenced>>
 
 ProcessUnreliableSequencedQueue ==
-    \E i \in 1..ChannelsPerMode :
+    \E i \in 1..UnreliableSequencedChannelCount :
         /\ Len(channels_unreliable_sequenced[i].queue) > 0
         /\ channels_unreliable_sequenced' = [channels_unreliable_sequenced EXCEPT 
                                            ![i].queue = Tail(channels_unreliable_sequenced[i].queue)]
@@ -315,7 +347,7 @@ ProcessUnreliableSequencedQueue ==
                       channels_reliable_sequenced, channels_reliable_unsequenced, channels_unreliable_unsequenced>>
 
 ProcessUnreliableUnsequencedQueue ==
-    \E i \in 1..ChannelsPerMode :
+    \E i \in 1..UnreliableUnsequencedChannelCount :
         /\ Len(channels_unreliable_unsequenced[i].queue) > 0
         /\ channels_unreliable_unsequenced' = [channels_unreliable_unsequenced EXCEPT 
                                              ![i].queue = Tail(channels_unreliable_unsequenced[i].queue)]
