@@ -298,39 +298,39 @@ AddEntitiesToCell(entity_increment) ==
 
 GenerateCommonTaskActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_COMMON) \div 10  (* Scale by entity count *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_COMMON) \div 3  (* Much more aggressive scaling *)
            actual_tasks == IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate
        IN EnqueueTask(actual_tasks)
 
 GenerateRareTaskActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_RARE) \div 100  (* Rare events scale slower *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_RARE) \div 20  (* Still rare but scales *)
            actual_tasks == IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate
        IN EnqueueTask(actual_tasks)
 
 GenerateMovementActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_MOVEMENT) \div 5  (* Movement scales with entities *)
-       IN EnqueueTask(tasks_to_generate)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_MOVEMENT) \div 2  (* Very frequent *)
+       IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateInteractionActivity ==
     /\ cell_data.numEntities > 0  
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_INTERACTION) \div 20  (* Interactions less frequent *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_INTERACTION) \div 8  (* More frequent interactions *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateWorldLoadActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_WORLD_LOAD) \div 50  (* World loading very infrequent *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_WORLD_LOAD) \div 15  (* Still expensive but scales *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateNetworkSyncActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_NETWORK_SYNC) \div 15  (* Network sync moderate *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_NETWORK_SYNC) \div 4  (* Frequent network sync *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GeneratePhysicsActivity ==
     /\ cell_data.numEntities > 0
-    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_PHYSICS) \div 8  (* Physics fairly frequent *)
+    /\ LET tasks_to_generate == (cell_data.numEntities * DB_OPS_PHYSICS) \div 3  (* Physics very frequent *)
        IN EnqueueTask(IF tasks_to_generate < 1 THEN 1 ELSE tasks_to_generate)
 
 GenerateEntityArrival == (*  Action to increase numEntities geometrically *)
@@ -526,6 +526,7 @@ GenerateZipfianTaskActivity ==
     \/ /\ ZIPF_WORLD_LOAD_WEIGHT >= 1 /\ SendWorldStateUpdate
 
 Next ==
+    \/ ProcessCellWork                   (* Process main queue FIRST - highest priority *)
     \/ GenerateZipfianTaskActivity       (* Primary load generator - sends to WebRTC channels *)
     \/ GenerateCommonTaskActivity        (* Generate database tasks *)
     \/ GenerateRareTaskActivity
@@ -539,7 +540,6 @@ Next ==
     \/ ProcessReliableUnsequencedQueue
     \/ ProcessUnreliableSequencedQueue
     \/ ProcessUnreliableUnsequencedQueue
-    \/ ProcessCellWork                   (* Process main queue - this should be the bottleneck *)
 
 (* -------------------------------- SPECIFICATION AND THEOREM -------------------------------- *)
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
