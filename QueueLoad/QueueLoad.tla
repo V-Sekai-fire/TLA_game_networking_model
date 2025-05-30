@@ -9,9 +9,9 @@ CONSTANTS
     BaselineEntities          (*  Initial entity count for the root cell. *)
 
 ASSUME A_QueueConstantsPositive ==
-    /\ TaskImpact_Common \in Pos
-    /\ TaskImpact_Rare \in Pos
-    /\ CellProcessingCapacity \in Pos
+    /\ TaskImpact_Common \in Nat \ {0}
+    /\ TaskImpact_Rare \in Nat \ {0}
+    /\ CellProcessingCapacity \in Nat \ {0}
 ASSUME A_ImpactHierarchy        ==
     TaskImpact_Rare >= TaskImpact_Common
 ASSUME A_BaselineEntitiesPositive ==
@@ -22,28 +22,28 @@ VARIABLES cell_data (*  Record for the single cell: [numEntities: Nat, requestQu
 vars == <<cell_data>>
 
 (*  ----------------------------- TYPE DEFINITIONS AND HELPERS ----------------------------- *)
-    CellType = [numEntities : Nat,
-                requestQueue : Seq(Nat) ] (*  Nat here is TaskImpact *)
+CellType == [numEntities : Nat,
+             requestQueue : Seq(Nat) ] (*  Nat here is TaskImpact *)
 
-    TypeOK =
-        /\ cell_data \in CellType
-        /\ cell_data.numEntities >= 0
-        /\ \A task_impact \in AsSet(cell_data.requestQueue) : task_impact \in Pos (*  Task impacts are positive *)
+TypeOK ==
+    /\ cell_data \in CellType
+    /\ cell_data.numEntities >= 0
+    /\ \A i \in 1..Len(cell_data.requestQueue) : cell_data.requestQueue[i] \in Nat \ {0}
 
 (*  ------------------------------------ INITIALIZATION ------------------------------------ *)
-    Init =
-        /\ cell_data = [ numEntities  |-> BaselineEntities,
-                        requestQueue |-> << >> ]
+Init ==
+    /\ cell_data = [ numEntities  |-> BaselineEntities,
+                    requestQueue |-> << >> ]
 
 (*  --------------------------------------- ACTIONS ---------------------------------------- *)
 
 (*  --- Actions to simulate task generation and enqueueing --- *)
 EnqueueTask(task_impact) ==
-    /\ task_impact \in Pos
+    /\ task_impact \in Nat \ {0}
     /\ cell_data' = [cell_data EXCEPT !.requestQueue = Append(cell_data.requestQueue, task_impact)]
 
 AddEntitiesToCell(entity_increment) ==
-    /\ entity_increment \in Pos
+    /\ entity_increment \in Nat \ {0}
     /\ cell_data' = [cell_data EXCEPT !.numEntities = cell_data.numEntities + entity_increment]
 
 GenerateCommonTaskActivity ==
@@ -58,12 +58,17 @@ GenerateEntityArrival == (*  Action to increase numEntities *)
 (*  --- Action to simulate cell processing its queue --- *)
 ProcessCellWork ==
     /\ Len(cell_data.requestQueue) > 0
-    /\ LET CanProcess(q, capacity_left, count) == (*  Returns number of tasks processed from head. *)
-                 IF q = << >> THEN count
-                 ELSE IF Head(q) <= capacity_left THEN CanProcess(Tail(q), capacity_left - Head(q), count + 1)
-                 ELSE count
-           num_processed_tasks == CanProcess(cell_data.requestQueue, CellProcessingCapacity, 0)
-       IN /\ cell_data' = [cell_data EXCEPT !.requestQueue = SubSeq(cell_data.requestQueue, num_processed_tasks + 1, Len(cell_data.requestQueue))]
+    /\ LET (*  Find how many tasks can be processed within capacity *)
+           ProcessedTasks(remaining_capacity, processed_count, queue_index) ==
+               IF queue_index > Len(cell_data.requestQueue) THEN processed_count
+               ELSE IF cell_data.requestQueue[queue_index] <= remaining_capacity 
+                    THEN ProcessedTasks(remaining_capacity - cell_data.requestQueue[queue_index], 
+                                      processed_count + 1, 
+                                      queue_index + 1)
+                    ELSE processed_count
+           num_processed_tasks == ProcessedTasks(CellProcessingCapacity, 0, 1)
+       IN /\ num_processed_tasks > 0
+          /\ cell_data' = [cell_data EXCEPT !.requestQueue = SubSeq(cell_data.requestQueue, num_processed_tasks + 1, Len(cell_data.requestQueue))]
 
 Next ==
     \/ GenerateCommonTaskActivity
